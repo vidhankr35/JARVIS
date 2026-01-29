@@ -10,6 +10,7 @@ interface ControlPanelProps {
   onFastToggle: () => void;
   onVoiceToggle: () => void;
   onModeChange: (mode: 'standard' | 'scientific' | 'engineering') => void;
+  onManualHologram?: (subject: string) => void;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({ 
@@ -20,7 +21,8 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   fastProtocol,
   onFastToggle,
   onVoiceToggle,
-  onModeChange 
+  onModeChange,
+  onManualHologram
 }) => {
   const [input, setInput] = useState('');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -46,6 +48,12 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     }
   };
 
+  const triggerHologram = () => {
+    const subject = input.trim() || "Complex Particle Simulation";
+    onManualHologram?.(subject);
+    setInput('');
+  };
+
   return (
     <div className="h-44 glass border-t border-cyan-500/20 px-8 py-3 flex flex-col gap-3 z-30">
       <div className="flex gap-4 items-center">
@@ -62,6 +70,13 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
           </button>
           <button onClick={onVoiceToggle} className={`px-3 py-1 text-[9px] mono rounded border transition-all ${isVoiceEnabled ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.3)]' : 'border-slate-700 text-slate-500'}`}>
             LIVE_LINK_{isVoiceEnabled ? 'ACTIVE' : 'OFF'}
+          </button>
+          <button 
+            type="button"
+            onClick={triggerHologram}
+            className="px-3 py-1 text-[9px] mono rounded border border-violet-500/40 text-violet-400 hover:bg-violet-500/10 transition-all uppercase"
+          >
+            Project_Hologram
           </button>
         </div>
         <div className="h-1 flex-1 bg-cyan-500/10 rounded overflow-hidden">

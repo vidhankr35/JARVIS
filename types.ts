@@ -17,6 +17,7 @@ export interface Message {
   thinking?: string;
   image?: string; // Base64 image data
   groundingLinks?: GroundingLink[];
+  isError?: boolean;
 }
 
 export interface JarvisState {

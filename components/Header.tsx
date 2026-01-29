@@ -29,11 +29,12 @@ const Header: React.FC<HeaderProps> = ({ speaking, listening, model }) => {
         </div>
         <div>
           <h1 className="text-2xl font-black tracking-[0.2em] text-cyan-400 mono">J.A.R.V.I.S.</h1>
-          <p className="text-[9px] text-cyan-500/40 mono font-bold uppercase tracking-widest flex items-center gap-2">
-            Neural_Core_v.8.5.2
-            <span className="w-1 h-1 bg-cyan-500/40 rounded-full" />
-            Stable_Build
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="text-[9px] text-cyan-500/40 mono font-bold uppercase tracking-widest">
+              Neural_Core_v.8.5.2
+            </p>
+            <span className="text-[8px] bg-violet-500/20 text-violet-400 px-1.5 py-0.5 rounded mono border border-violet-500/30 animate-pulse">PHYSICS_MATH_SYNCED</span>
+          </div>
         </div>
       </div>
 

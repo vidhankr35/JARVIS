@@ -2,12 +2,26 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration, GenerateContentResponse } from '@google/genai';
 import { Message, MessageRole, JarvisState, GroundingLink } from './types';
-import { JARVIS_SYSTEM_INSTRUCTION, INITIAL_GREETING } from './constants';
+import { JARVIS_SYSTEM_INSTRUCTION, INITIAL_GREETING, ERROR_MESSAGES } from './constants';
 import Header from './components/Header';
 import ChatWindow from './components/ChatWindow';
 import JarvisCore from './components/JarvisCore';
 import Sidebar from './components/Sidebar';
 import ControlPanel from './components/ControlPanel';
+import HologramStage from './components/HologramStage';
+
+// --- Shared Tool Definitions ---
+const HOLOGRAM_TOOL: FunctionDeclaration = {
+  name: 'generate_hologram',
+  description: 'Projects a 3D holographic visual of a subject. Use this for complex physical structures, molecules, planets, or mechanical parts.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      subject: { type: Type.STRING, description: 'The specific object or structure to render as a hologram.' }
+    },
+    required: ['subject']
+  }
+};
 
 // --- Core SDK Utilities (PCM Encoding/Decoding) ---
 function encode(bytes: Uint8Array) {
@@ -63,10 +77,9 @@ const App: React.FC = () => {
     hologram: null
   });
 
-  const chatEndRef = useRef<HTMLDivElement>(null);
   const outAudioCtxRef = useRef<AudioContext | null>(null);
   const inAudioCtxRef = useRef<AudioContext | null>(null);
-  const sessionPromiseRef = useRef<Promise<any> | null>(null);
+  const sessionRef = useRef<any>(null);
   const nextStartTimeRef = useRef<number>(0);
   const activeSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const currentOutputTranscriptionRef = useRef<string>('');
@@ -77,17 +90,15 @@ const App: React.FC = () => {
     setState(prev => ({ ...prev, apiLogs: [log, ...prev.apiLogs].slice(0, 15) }));
   }, []);
 
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
   const generateHologram = async (subject: string) => {
     try {
       addApiLog(`INIT_HOLOGRAPHIC_RENDER: ${subject}`);
+      setState(prev => ({ ...prev, hologram: { subject, imageUrl: null } }));
+      
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
-        contents: { parts: [{ text: `A vibrant blue glowing futuristic 3D holographic wireframe of ${subject}, technical schematic style, isolated on pure black background, cybernetic HUD details, high fidelity.` }] }
+        contents: { parts: [{ text: `A vibrant electric blue glowing futuristic 3D holographic wireframe technical drawing of ${subject}, isolated on solid pure black background, digital HUD overlay elements, glitchy scanlines, high tech schematic.` }] }
       });
 
       const part = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
@@ -95,9 +106,11 @@ const App: React.FC = () => {
         setState(prev => ({ ...prev, hologram: { subject, imageUrl: `data:image/png;base64,${part.inlineData.data}` } }));
         addApiLog("HOLOGRAPH_PROJECTED_STABLE");
       }
-    } catch (e) {
-      addApiLog("RENDER_PROTO_ERROR");
+    } catch (e: any) {
+      const errMsg = e?.message || "Render failure";
+      addApiLog(`RENDER_ERROR: ${errMsg}`);
       console.error(e);
+      setState(prev => ({ ...prev, hologram: null }));
     }
   };
 
@@ -107,16 +120,17 @@ const App: React.FC = () => {
     
     addApiLog("TERMINATING_NEURAL_UPLINK...");
     
-    if (sessionPromiseRef.current) {
+    if (sessionRef.current) {
       try {
-        const session = await sessionPromiseRef.current;
-        session.close();
+        sessionRef.current.close();
       } catch (e) {}
-      sessionPromiseRef.current = null;
+      sessionRef.current = null;
     }
     
     if (inAudioCtxRef.current) {
-      await inAudioCtxRef.current.close();
+      try {
+        await inAudioCtxRef.current.close();
+      } catch (e) {}
       inAudioCtxRef.current = null;
     }
     
@@ -140,16 +154,6 @@ const App: React.FC = () => {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
 
-      const hologramTool: FunctionDeclaration = {
-        name: 'generate_hologram',
-        description: 'Projects a 3D holographic visual of a subject.',
-        parameters: {
-          type: Type.OBJECT,
-          properties: { subject: { type: Type.STRING, description: 'The object to render' } },
-          required: ['subject']
-        }
-      };
-
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
@@ -157,14 +161,12 @@ const App: React.FC = () => {
             if (!inAudioCtxRef.current) return;
             addApiLog("NEURAL_SYNC_ESTABLISHED");
             const source = inAudioCtxRef.current.createMediaStreamSource(stream);
-            const scriptProcessor = inAudioCtxRef.current.createScriptProcessor(4096, 1, 1);
+            const scriptProcessor = inAudioCtxRef.current.createScriptProcessor(2048, 1, 1);
             
             scriptProcessor.onaudioprocess = (e) => {
-              if (sessionPromiseRef.current) {
-                sessionPromiseRef.current.then((session) => {
-                  const pcmBlob = createBlob(e.inputBuffer.getChannelData(0));
-                  session.sendRealtimeInput({ media: pcmBlob });
-                });
+              if (sessionRef.current) {
+                const pcmBlob = createBlob(e.inputBuffer.getChannelData(0));
+                sessionRef.current.sendRealtimeInput({ media: pcmBlob });
               }
             };
             
@@ -179,9 +181,11 @@ const App: React.FC = () => {
                 if (fc.name === 'generate_hologram') {
                   generateHologram((fc.args as any).subject);
                 }
-                sessionPromise.then(s => s.sendToolResponse({
-                  functionResponses: [{ id: fc.id, name: fc.name, response: { result: "Rendering complete, Sir." } }]
-                }));
+                if (sessionRef.current) {
+                  sessionRef.current.sendToolResponse({
+                    functionResponses: [{ id: fc.id, name: fc.name, response: { result: "Rendering complete, Sir." } }]
+                  });
+                }
               }
             }
 
@@ -208,14 +212,16 @@ const App: React.FC = () => {
               const input = currentInputTranscriptionRef.current;
               const output = currentOutputTranscriptionRef.current;
               
-              setMessages(prev => [
-                ...prev,
-                ...(input ? [{ id: `in-${ts}`, role: MessageRole.USER, text: input, timestamp: ts }] : []),
-                ...(output ? [{ id: `out-${ts}`, role: MessageRole.JARVIS, text: output, timestamp: ts }] : [])
-              ]);
-              
-              if (output) {
-                setState(prev => ({ ...prev, memory: [output.slice(0, 50) + "...", ...prev.memory].slice(0, 10) }));
+              if (input || output) {
+                setMessages(prev => [
+                  ...prev,
+                  ...(input ? [{ id: `in-${ts}`, role: MessageRole.USER, text: input, timestamp: ts }] : []),
+                  ...(output ? [{ id: `out-${ts}`, role: MessageRole.JARVIS, text: output, timestamp: ts }] : [])
+                ]);
+                
+                if (output) {
+                  setState(prev => ({ ...prev, memory: [output.slice(0, 50) + "...", ...prev.memory].slice(0, 10) }));
+                }
               }
               
               currentInputTranscriptionRef.current = ''; 
@@ -230,9 +236,19 @@ const App: React.FC = () => {
               addApiLog("SEQUENCE_OVERRIDE");
             }
           },
-          onerror: () => {
-            addApiLog("SIGNAL_DEGRADATION");
+          onerror: (err: any) => {
+            const errorText = err?.message || "Unknown stream error";
+            addApiLog(`LIVE_SIGNAL_FAIL: ${errorText}`);
+            console.error("Live session error:", err);
             stopLiveSession();
+            
+            setMessages(prev => [...prev, {
+              id: `err-${Date.now()}`,
+              role: MessageRole.JARVIS,
+              text: ERROR_MESSAGES.OFFLINE,
+              timestamp: Date.now(),
+              isError: true
+            }]);
           },
           onclose: () => {
             addApiLog("UPLINK_CLOSED");
@@ -243,15 +259,17 @@ const App: React.FC = () => {
           responseModalities: [Modality.AUDIO],
           systemInstruction: JARVIS_SYSTEM_INSTRUCTION,
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
-          tools: [{ functionDeclarations: [hologramTool] }],
+          tools: [{ functionDeclarations: [HOLOGRAM_TOOL] }],
           inputAudioTranscription: {},
           outputAudioTranscription: {},
         }
       });
-      sessionPromiseRef.current = sessionPromise;
-      await sessionPromise;
-    } catch (e) {
-      addApiLog("UPLINK_INIT_FAILED");
+      
+      const resolvedSession = await sessionPromise;
+      sessionRef.current = resolvedSession;
+    } catch (e: any) {
+      console.error("Failed to start live session:", e);
+      addApiLog(`UPLINK_FAIL: ${e?.message || 'Handshake failed'}`);
     }
   };
 
@@ -286,12 +304,15 @@ const App: React.FC = () => {
         const config: any = { 
           systemInstruction: JARVIS_SYSTEM_INSTRUCTION + `\nCURRENT_DIRECTIVE: ${state.currentMode.toUpperCase()}`,
           temperature: isScientific ? 0.3 : 0.7,
-          tools: state.currentMode === 'standard' ? [{ googleSearch: {} }] : undefined
+          tools: [
+            { functionDeclarations: [HOLOGRAM_TOOL] },
+            ...(state.currentMode === 'standard' ? [{ googleSearch: {} }] : [])
+          ]
         };
 
         if (isScientific) {
-          config.thinkingConfig = { thinkingBudget: 32768 };
-          config.maxOutputTokens = 40000;
+          config.thinkingConfig = { thinkingBudget: 16000 };
+          config.maxOutputTokens = 20000;
         }
 
         response = await ai.models.generateContent({
@@ -302,6 +323,16 @@ const App: React.FC = () => {
           })),
           config: config
         });
+
+        // Handle Function Calls from text generation
+        if (response.functionCalls && response.functionCalls.length > 0) {
+          for (const fc of response.functionCalls) {
+            if (fc.name === 'generate_hologram') {
+              const subject = (fc.args as any).subject;
+              generateHologram(subject);
+            }
+          }
+        }
       }
 
       const groundingLinks: GroundingLink[] = [];
@@ -312,7 +343,7 @@ const App: React.FC = () => {
         });
       }
 
-      let resText = response.text || "Diagnostic data corrupted.";
+      let resText = response.text || "Diagnostic data received, Sir.";
       let resImage: string | undefined;
 
       const imgPart = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
@@ -335,9 +366,34 @@ const App: React.FC = () => {
       }));
       
       addApiLog("DATA_RECEPTION_COMPLETE");
-    } catch (e) { 
-      addApiLog("CORE_SYNCHRONIZATION_ERROR"); 
-      setMessages(prev => [...prev, { id: `e-${Date.now()}`, role: MessageRole.JARVIS, text: "Satellite link conflict. Switching to local cache.", timestamp: Date.now() }]);
+    } catch (e: any) { 
+      console.error(e);
+      let errorMessage = ERROR_MESSAGES.GENERIC;
+      const lowerError = e?.message?.toLowerCase() || "";
+      
+      if (lowerError.includes("quota") || lowerError.includes("429")) {
+        errorMessage = ERROR_MESSAGES.QUOTA;
+        addApiLog("ERROR_429: BANDWIDTH_LIMIT");
+      } else if (lowerError.includes("safety") || lowerError.includes("blocked")) {
+        errorMessage = ERROR_MESSAGES.SAFETY;
+        addApiLog("ERROR_SAFETY: PROTOCOL_VIOLATION");
+      } else if (lowerError.includes("network") || lowerError.includes("fetch")) {
+        errorMessage = ERROR_MESSAGES.OFFLINE;
+        addApiLog("ERROR_NETWORK: UPLINK_LOST");
+      } else if (lowerError.includes("timeout")) {
+        errorMessage = ERROR_MESSAGES.TIMEOUT;
+        addApiLog("ERROR_TIMEOUT: STARK_SATELLITE_LAG");
+      } else {
+        addApiLog(`ERROR_CRITICAL: ${e?.message || 'UNKNOWN_EXCEPTION'}`);
+      }
+
+      setMessages(prev => [...prev, { 
+        id: `e-${Date.now()}`, 
+        role: MessageRole.JARVIS, 
+        text: errorMessage, 
+        timestamp: Date.now(),
+        isError: true
+      }]);
     } finally { 
       setState(prev => ({ ...prev, isProcessing: false })); 
     }
@@ -354,35 +410,63 @@ const App: React.FC = () => {
         />
         
         <div className="flex-1 flex relative overflow-hidden">
+          {/* Enhanced 3D Hologram Overlay */}
           {state.hologram && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-2xl animate-in fade-in zoom-in duration-500">
-              <div className="relative w-full max-w-5xl flex flex-col items-center">
-                <button 
-                  onClick={() => setState(s => ({...s, hologram: null}))}
-                  className="absolute -top-16 right-0 text-cyan-400 border border-cyan-400/30 px-6 py-2 rounded-full hover:bg-cyan-400/10 transition-all mono text-xs uppercase tracking-widest"
-                >
-                  Terminate_Projection [ESC]
-                </button>
-                <div className="relative w-full aspect-video glass border border-cyan-400/50 rounded-3xl overflow-hidden shadow-[0_0_120px_rgba(34,211,238,0.15)] flex items-center justify-center p-6">
+            <div className="absolute inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-3xl animate-in fade-in zoom-in duration-500 overflow-hidden">
+              <div className="crt-overlay opacity-30"></div>
+              
+              <div className="relative w-full h-full flex flex-col items-center">
+                <div className="absolute top-8 w-full flex justify-between px-12 z-[120]">
+                  <div className="flex flex-col gap-1">
+                    <span className="mono text-cyan-400 text-3xl font-black uppercase tracking-[0.3em] drop-shadow-[0_0_20px_rgba(34,211,238,0.8)]">
+                      {state.hologram.subject}
+                    </span>
+                    <div className="h-0.5 w-full bg-gradient-to-r from-cyan-400 to-transparent" />
+                  </div>
+                  
+                  <button 
+                    onClick={() => setState(s => ({...s, hologram: null}))}
+                    className="h-fit text-cyan-400 border border-cyan-400/40 px-8 py-2.5 rounded-full hover:bg-cyan-400/20 hover:text-white transition-all mono text-xs uppercase tracking-[0.2em] font-bold bg-black/40 backdrop-blur-md"
+                  >
+                    TERMINATE_PROJECTION [ESC]
+                  </button>
+                </div>
+                
+                <div className="flex-1 w-full relative">
                   {state.hologram.imageUrl ? (
-                    <div className="relative group w-full h-full flex items-center justify-center">
-                      <img 
-                        src={state.hologram.imageUrl} 
-                        alt={state.hologram.subject} 
-                        className="max-h-full max-w-full mix-blend-screen opacity-90 drop-shadow-[0_0_40px_rgba(34,211,238,0.6)] animate-pulse" 
-                      />
-                      <div className="absolute inset-0 bg-cyan-400/5 mix-blend-overlay" />
-                      <div className="absolute inset-0 w-full h-3 bg-cyan-400/30 blur-xl animate-[scan_5s_infinite_linear] pointer-events-none" />
-                    </div>
+                    <HologramStage imageUrl={state.hologram.imageUrl} subject={state.hologram.subject} />
                   ) : (
-                    <div className="flex flex-col items-center gap-8">
-                      <div className="w-20 h-20 border-4 border-cyan-400/20 border-t-cyan-400 rounded-full animate-spin" />
-                      <div className="mono text-cyan-400 text-sm animate-pulse tracking-[0.4em]">SYNTHESIZING_GEOMETRY...</div>
+                    <div className="w-full h-full flex flex-col items-center justify-center gap-10">
+                      <div className="relative">
+                        <div className="w-32 h-32 border-4 border-cyan-400/10 border-t-cyan-400 rounded-full animate-spin" />
+                        <div className="absolute inset-0 flex items-center justify-center mono text-cyan-400 text-xs font-bold">
+                          RECONSTRUCTING...
+                        </div>
+                      </div>
+                      <div className="mono text-cyan-400 text-lg animate-pulse tracking-[0.5em] font-black uppercase">
+                        INITIALIZING_HOLOGRAPHIC_INTERFACE
+                      </div>
                     </div>
                   )}
                 </div>
-                <div className="mt-12 mono text-4xl font-black text-cyan-400 tracking-[1em] uppercase drop-shadow-[0_0_25px_rgba(34,211,238,0.8)]">
-                  {state.hologram.subject}
+
+                <div className="absolute bottom-12 w-full flex justify-center z-[120] pointer-events-none">
+                  <div className="glass px-12 py-4 rounded-full border border-cyan-500/30 flex gap-8 items-center animate-in slide-in-from-bottom-8 duration-1000">
+                    <div className="flex flex-col items-center">
+                      <span className="text-[8px] mono text-cyan-400/40 uppercase">Resolution</span>
+                      <span className="text-xs mono text-cyan-400 font-bold tracking-widest">4K_ULTRA</span>
+                    </div>
+                    <div className="w-px h-6 bg-cyan-500/20" />
+                    <div className="flex flex-col items-center">
+                      <span className="text-[8px] mono text-cyan-400/40 uppercase">Refresh</span>
+                      <span className="text-xs mono text-cyan-400 font-bold tracking-widest">120_HZ</span>
+                    </div>
+                    <div className="w-px h-6 bg-cyan-500/20" />
+                    <div className="flex flex-col items-center">
+                      <span className="text-[8px] mono text-cyan-400/40 uppercase">Sync_Protocol</span>
+                      <span className="text-xs mono text-cyan-400 font-bold tracking-widest">NEURAL_STABLE</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -393,7 +477,6 @@ const App: React.FC = () => {
           </div>
           <div className="flex-1 flex flex-col z-10 px-12 py-8 overflow-hidden">
             <ChatWindow messages={messages} isProcessing={state.isProcessing} />
-            <div ref={chatEndRef} />
           </div>
         </div>
 
@@ -413,13 +496,14 @@ const App: React.FC = () => {
             }
           }}
           onModeChange={(m) => setState(s => ({...s, currentMode: m}))}
+          onManualHologram={(subject) => generateHologram(subject)}
         />
       </main>
       <style>{`
         @keyframes scan {
           0% { transform: translateY(-100%); opacity: 0; }
-          20% { opacity: 1; }
-          80% { opacity: 1; }
+          20% { opacity: 0.8; }
+          80% { opacity: 0.8; }
           100% { transform: translateY(800%); opacity: 0; }
         }
         .theme-scientific { --theme-accent: 139, 92, 246; }
