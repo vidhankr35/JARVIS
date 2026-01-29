@@ -1,0 +1,8 @@
+{
+  "name": "J.A.R.V.I.S. Core Interface",
+  "description": "An advanced AI assistant modeled after JARVIS, featuring high-level scientific reasoning, a futuristic 3D interface, and integrated speech capabilities.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
