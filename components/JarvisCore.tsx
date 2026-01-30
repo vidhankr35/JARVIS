@@ -1,99 +1,127 @@
 
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
+import * as THREE from 'three';
+import { THEMES } from '../constants';
+import { JarvisTheme } from '../types';
 
 interface JarvisCoreProps {
   active: boolean;
-  mode?: 'standard' | 'scientific' | 'engineering';
+  theme: JarvisTheme;
+  speaking?: boolean;
 }
 
-const JarvisCore: React.FC<JarvisCoreProps> = ({ active, mode = 'standard' }) => {
-  const accentColor = mode === 'scientific' ? 'violet' : (mode === 'engineering' ? 'amber' : 'cyan');
+const JarvisCore: React.FC<JarvisCoreProps> = ({ active, theme, speaking }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const themeColors = THEMES[theme];
   
-  const getModeColorClass = () => {
-    switch (accentColor) {
-      case 'violet': return 'border-violet-500/30';
-      case 'amber': return 'border-amber-500/30';
-      default: return 'border-cyan-500/30';
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const width = containerRef.current.clientWidth;
+    const height = containerRef.current.clientHeight;
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
+    camera.position.z = 7;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(width, height);
+    containerRef.current.appendChild(renderer.domElement);
+
+    const themeColor = new THREE.Color(themeColors.primary);
+    const accentColor = new THREE.Color(themeColors.accent);
+
+    const group = new THREE.Group();
+    scene.add(group);
+
+    // Fractal Core
+    const coreGeo = new THREE.IcosahedronGeometry(1.5, 3);
+    const coreMat = new THREE.MeshPhongMaterial({ 
+      color: themeColor, 
+      wireframe: true, 
+      transparent: true, 
+      opacity: 0.1,
+      emissive: themeColor,
+      emissiveIntensity: 0.8
+    });
+    const core = new THREE.Mesh(coreGeo, coreMat);
+    group.add(core);
+
+    // Orbital Shells
+    const shells: THREE.Mesh[] = [];
+    for(let i=0; i<5; i++) {
+      const shellGeo = new THREE.TorusGeometry(2.5 + i*0.8, 0.02, 16, 120);
+      const shellMat = new THREE.MeshBasicMaterial({ 
+        color: i % 2 === 0 ? themeColor : accentColor, 
+        transparent: true, 
+        opacity: 0.3 - i*0.05 
+      });
+      const shell = new THREE.Mesh(shellGeo, shellMat);
+      shell.rotation.x = Math.random() * Math.PI;
+      shell.rotation.y = Math.random() * Math.PI;
+      group.add(shell);
+      shells.push(shell);
     }
-  };
 
-  const getActiveColorClass = () => {
-    switch (accentColor) {
-      case 'violet': return 'border-violet-400 bg-violet-400';
-      case 'amber': return 'border-amber-400 bg-amber-400';
-      default: return 'border-cyan-400 bg-cyan-400';
-    }
-  };
+    // Neural Cloud
+    const pCount = 4000;
+    const pGeo = new THREE.BufferGeometry();
+    const pPos = new Float32Array(pCount * 3);
+    for(let i=0; i<pCount*3; i++) pPos[i] = (Math.random() - 0.5) * 20;
+    pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+    const pMat = new THREE.PointsMaterial({ size: 0.025, color: themeColor, transparent: true, opacity: 0.2 });
+    const points = new THREE.Points(pGeo, pMat);
+    scene.add(points);
 
-  return (
-    <div className="relative w-full h-full flex items-center justify-center pointer-events-none transition-all duration-1000">
-      <div className="relative w-[700px] h-[700px]">
-        {/* Outer Most HUD Ring */}
-        <div className={`absolute inset-0 border-[1px] border-dashed ${getModeColorClass()} rounded-full ${active ? 'animate-[spin_60s_linear_infinite]' : 'animate-[spin_120s_linear_infinite]'}`} />
-        
-        {/* Ring with Data Labels */}
-        <div className={`absolute inset-[10%] border-[1px] border-${accentColor}-400/10 rounded-full ${active ? 'animate-[spin_40s_linear_infinite_reverse]' : 'animate-[spin_80s_linear_infinite_reverse]'}`}>
-          {[...Array(8)].map((_, i) => (
-            <div 
-              key={i} 
-              className="absolute top-0 left-1/2 -translate-x-1/2 h-full"
-              style={{ transform: `rotate(${i * 45}deg)` }}
-            >
-              <span className={`text-[8px] mono text-${accentColor}-400/40 uppercase tracking-tighter absolute -top-4 -translate-x-1/2`}>
-                DATA_STR_{i*128}
-              </span>
-            </div>
-          ))}
-        </div>
+    const light = new THREE.PointLight(themeColor, 15, 30);
+    scene.add(light);
 
-        {/* Secondary HUD Ring */}
-        <div className={`absolute inset-[20%] border-[2px] border-${accentColor}-400/20 rounded-full ${active ? 'animate-[spin_15s_linear_infinite]' : 'animate-[spin_45s_linear_infinite]'}`}>
-           <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-12 h-2 bg-${accentColor}-400/40`} />
-           <div className={`absolute bottom-0 left-1/2 -translate-x-1/2 w-12 h-2 bg-${accentColor}-400/40`} />
-           <div className={`absolute left-0 top-1/2 -translate-y-1/2 w-2 h-12 bg-${accentColor}-400/40`} />
-           <div className={`absolute right-0 top-1/2 -translate-y-1/2 w-2 h-12 bg-${accentColor}-400/40`} />
-        </div>
+    const clock = new THREE.Clock();
+    let frameId: number;
 
-        {/* Inner Reactor Assembly */}
-        <div className="absolute inset-[35%] flex items-center justify-center">
-            <div className={`w-64 h-64 rounded-full border-2 border-${accentColor}-400/40 flex items-center justify-center ${active ? 'scale-110 shadow-[0_0_50px_rgba(var(--theme-accent),0.2)]' : 'scale-100'} transition-all duration-700 relative`}>
-              <div className={`w-48 h-48 rounded-full bg-${accentColor}-400/5 blur-3xl ${active ? 'animate-pulse' : ''}`} />
-              <div className={`absolute inset-0 border-[1px] border-dashed border-${accentColor}-400/30 rounded-full animate-[spin_8s_linear_infinite]`} />
-              
-              <div className={`w-24 h-24 rounded-full border border-${accentColor}-400/60 flex items-center justify-center relative`}>
-                <div className={`w-6 h-6 rounded-full bg-${accentColor}-400 ${active ? 'animate-ping' : 'opacity-40'} transition-all`} />
-                {/* Micro Details */}
-                <div className={`absolute inset-[-10px] border border-${accentColor}-400/20 rounded-full animate-[spin_4s_linear_infinite_reverse]`} />
-              </div>
-            </div>
-        </div>
+    const animate = () => {
+      const dt = clock.getDelta();
+      const time = clock.getElapsedTime();
 
-        {/* Orbital Navigation Components */}
-        {[...Array(24)].map((_, i) => (
-          <div 
-            key={i}
-            className="absolute inset-0"
-            style={{ transform: `rotate(${i * 15}deg)` }}
-          >
-            <div className={`absolute top-0 left-1/2 -translate-x-1/2 w-1 h-3 bg-${accentColor}-400/30 rounded-full transition-all duration-500 ${active ? 'h-10 opacity-100 translate-y-[-5px]' : 'opacity-10'}`} />
-          </div>
-        ))}
+      group.rotation.y += active ? 1.2 * dt : 0.3 * dt;
+      group.rotation.z += active ? 0.6 * dt : 0.1 * dt;
 
-        {/* Corner HUD Decals */}
-        <div className="absolute inset-0 opacity-10 pointer-events-none">
-           <div className={`absolute top-20 left-20 w-40 h-40 border-l border-t border-${accentColor}-400`} />
-           <div className={`absolute bottom-20 right-20 w-40 h-40 border-r border-b border-${accentColor}-400`} />
-        </div>
-      </div>
+      const scale = speaking ? 1 + Math.sin(time * 18) * 0.2 : 1 + Math.sin(time * 2.5) * 0.08;
+      core.scale.setScalar(scale);
+      core.material.opacity = speaking ? 0.7 : 0.15;
+      core.material.emissiveIntensity = speaking ? 1.5 : 0.8;
 
-      <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
-    </div>
-  );
+      shells.forEach((s, i) => {
+        s.rotation.x += dt * (i + 1) * 0.12;
+        s.rotation.y += dt * (i + 1) * 0.18;
+        const sScale = speaking ? 1 + Math.sin(time * 12 + i) * 0.05 : 1;
+        s.scale.setScalar(sScale);
+      });
+
+      points.rotation.y += 0.08 * dt;
+      points.rotation.x += 0.02 * dt;
+
+      renderer.render(scene, camera);
+      frameId = requestAnimationFrame(animate);
+    };
+    animate();
+
+    const resize = () => {
+      if(!containerRef.current) return;
+      camera.aspect = containerRef.current.clientWidth / containerRef.current.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+    };
+    window.addEventListener('resize', resize);
+
+    return () => {
+      cancelAnimationFrame(frameId);
+      window.removeEventListener('resize', resize);
+      renderer.dispose();
+      if(containerRef.current) containerRef.current.removeChild(renderer.domElement);
+    };
+  }, [theme, active, speaking]);
+
+  return <div ref={containerRef} className="w-full h-full mix-blend-screen" />;
 };
 
 export default JarvisCore;

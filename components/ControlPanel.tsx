@@ -1,13 +1,13 @@
 
 import React, { useState, useRef } from 'react';
+import { JarvisTheme } from '../types';
 
 interface ControlPanelProps {
   onSend: (text: string, imageData?: string) => void;
   isProcessing: boolean;
   isVoiceEnabled: boolean;
   isListening: boolean;
-  fastProtocol: boolean;
-  onFastToggle: () => void;
+  theme: JarvisTheme;
   onVoiceToggle: () => void;
   onModeChange: (mode: 'standard' | 'scientific' | 'engineering') => void;
   onManualHologram?: (subject: string) => void;
@@ -18,8 +18,6 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   isProcessing, 
   isVoiceEnabled,
   isListening,
-  fastProtocol,
-  onFastToggle,
   onVoiceToggle,
   onModeChange,
   onManualHologram
@@ -41,91 +39,73 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setImagePreview(reader.result as string);
-      };
+      reader.onloadend = () => setImagePreview(reader.result as string);
       reader.readAsDataURL(file);
     }
   };
 
-  const triggerHologram = () => {
-    const subject = input.trim() || "Complex Particle Simulation";
-    onManualHologram?.(subject);
-    setInput('');
-  };
-
   return (
-    <div className="h-44 glass border-t border-cyan-500/20 px-8 py-3 flex flex-col gap-3 z-30">
-      <div className="flex gap-4 items-center">
-        <div className="flex gap-2 border border-cyan-500/20 rounded p-1 bg-black/40">
-           {(['standard', 'scientific', 'engineering'] as const).map((m) => (
-             <button key={m} onClick={() => onModeChange(m)} className="px-2 py-1 text-[9px] mono rounded hover:bg-cyan-500/10 text-cyan-500/60 hover:text-cyan-400 uppercase transition-all">
-               {m}
-             </button>
-           ))}
+    <div className="glass border-t border-cyan-500/20 p-4 lg:p-6 z-30 flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex bg-black/40 border border-cyan-500/20 rounded p-1">
+          {(['standard', 'scientific', 'engineering'] as const).map((m) => (
+            <button key={m} onClick={() => onModeChange(m)} className="px-3 py-1 text-[9px] mono rounded hover:bg-cyan-500/10 text-cyan-500/50 hover:text-cyan-400 uppercase transition-all">
+              {m}
+            </button>
+          ))}
         </div>
-        <div className="flex gap-2 items-center">
-          <button onClick={onFastToggle} className={`px-3 py-1 text-[9px] mono rounded border transition-all ${fastProtocol ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' : 'border-slate-700 text-slate-500'}`}>
-            FAST_LINK_{fastProtocol ? 'ON' : 'OFF'}
-          </button>
-          <button onClick={onVoiceToggle} className={`px-3 py-1 text-[9px] mono rounded border transition-all ${isVoiceEnabled ? 'bg-cyan-500/20 border-cyan-500 text-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.3)]' : 'border-slate-700 text-slate-500'}`}>
-            LIVE_LINK_{isVoiceEnabled ? 'ACTIVE' : 'OFF'}
-          </button>
+        
+        <div className="flex items-center gap-2">
           <button 
-            type="button"
-            onClick={triggerHologram}
-            className="px-3 py-1 text-[9px] mono rounded border border-violet-500/40 text-violet-400 hover:bg-violet-500/10 transition-all uppercase"
+            onClick={onVoiceToggle} 
+            className={`px-4 py-2 text-[10px] mono rounded-full border transition-all flex items-center gap-2 ${isVoiceEnabled ? 'bg-cyan-500/20 border-cyan-400 text-cyan-400 shadow-lg' : 'border-slate-700 text-slate-500'}`}
           >
-            Project_Hologram
+            <div className={`w-1.5 h-1.5 rounded-full ${isVoiceEnabled ? 'bg-cyan-400 animate-pulse' : 'bg-slate-700'}`} />
+            {isVoiceEnabled ? 'VOICE_LIVE' : 'VOICE_LINK'}
           </button>
-        </div>
-        <div className="h-1 flex-1 bg-cyan-500/10 rounded overflow-hidden">
-          <div className="h-full bg-cyan-400/30 w-1/3 animate-[progress_3s_infinite_linear]" />
+          
+          <button 
+            onClick={() => onManualHologram?.(input || 'Structural Geometry')}
+            className="px-4 py-2 text-[10px] mono rounded-full border border-violet-500/30 text-violet-400 hover:bg-violet-500/10 transition-all uppercase"
+          >
+            Project
+          </button>
         </div>
       </div>
 
-      {imagePreview && (
-        <div className="flex gap-2 items-center mb-1">
-          <div className="relative w-12 h-12 border border-cyan-400 rounded overflow-hidden group">
-            <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
-            <button 
-              onClick={() => setImagePreview(null)}
-              className="absolute inset-0 bg-black/60 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-xs"
-            >
-              ×
-            </button>
-          </div>
-          <span className="mono text-[10px] text-cyan-400 animate-pulse">SCHEMA_LOADED</span>
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} className="flex gap-4 items-center">
-        <input 
-          type="file" 
-          accept="image/*" 
-          className="hidden" 
-          ref={fileInputRef} 
-          onChange={handleImageUpload} 
-        />
+      <form onSubmit={handleSubmit} className="flex gap-3 items-center">
+        <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
         <button 
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="p-3 border border-cyan-500/30 rounded-lg hover:bg-cyan-500/10 transition-all text-cyan-400"
+          className="p-3 border border-cyan-500/20 rounded-xl hover:bg-cyan-500/10 text-cyan-500 transition-all flex-shrink-0"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
         </button>
 
-        <div className="flex-1 relative">
+        <div className="flex-1 relative group">
+          <div className="absolute inset-0 bg-cyan-400/5 blur-md rounded-xl group-focus-within:bg-cyan-400/10 transition-all" />
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={isListening ? "Voice Protocol Engaged..." : "Input command, Sir..."}
-            className={`w-full bg-transparent border rounded-lg px-6 py-3 text-cyan-100 placeholder:text-cyan-900/50 focus:outline-none transition-all mono text-sm ${isListening ? 'border-cyan-400 bg-cyan-500/5' : 'border-cyan-500/30 focus:border-cyan-400'}`}
+            placeholder={isListening ? "Listening for command..." : "Awaiting directive, Sir..."}
+            className="w-full relative bg-black/40 border border-cyan-500/20 rounded-xl px-6 py-4 text-cyan-100 placeholder:text-cyan-900/40 focus:outline-none focus:border-cyan-400 transition-all mono text-sm"
           />
+          {imagePreview && (
+            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2">
+              <img src={imagePreview} className="w-8 h-8 rounded border border-cyan-500/50 object-cover" />
+              <button type="button" onClick={() => setImagePreview(null)} className="text-red-400 hover:text-red-300">×</button>
+            </div>
+          )}
         </div>
-        <button type="submit" disabled={isProcessing && !isVoiceEnabled} className="bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/40 px-8 py-3 rounded-lg text-cyan-400 font-bold uppercase text-xs tracking-widest transition-all disabled:opacity-30">
-          {isProcessing ? 'SCANNING...' : 'EXECUTE'}
+
+        <button 
+          type="submit" 
+          disabled={isProcessing} 
+          className="bg-cyan-500/20 border border-cyan-400 text-cyan-400 font-black px-8 py-4 rounded-xl text-xs tracking-widest hover:bg-cyan-500/30 transition-all disabled:opacity-20 flex-shrink-0"
+        >
+          {isProcessing ? 'SCANNING' : 'EXECUTE'}
         </button>
       </form>
     </div>
