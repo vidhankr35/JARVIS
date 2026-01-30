@@ -101,4 +101,5 @@ export const ERROR_MESSAGES = {
   GENERIC: "Uncaught exception in the neural net. Rerouting...",
   AUTH_FAILED: "Biometric signature rejected. Security teams alerted.",
   PROJECTION_FAILED: "Sir, I've encountered a spatial rendering error. The holographic array is currently unresponsive.",
+  MISSING_KEY: "Sir, I'm detecting a configuration mismatch. The API access key is missing from the environment.",
 };

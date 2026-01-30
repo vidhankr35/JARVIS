@@ -72,11 +72,23 @@ const App: React.FC = () => {
   const sessionRef = useRef<any>(null);
   const outAudioCtxRef = useRef<AudioContext | null>(null);
   const nextStartTimeRef = useRef<number>(0);
-  const analyzerRef = useRef<AnalyserNode | null>(null);
+  const analyzerRef = useRef<analyzerNode | null>(null);
 
   const addLog = useCallback((log: string) => {
     setState(prev => ({ ...prev, apiLogs: [log, ...prev.apiLogs].slice(0, 20) }));
   }, []);
+
+  const validateApiKey = useCallback(() => {
+    // Detect if key is missing or set to the string 'undefined' by build tools
+    const key = process.env.API_KEY;
+    const isMissing = !key || key === 'undefined' || key === 'null' || key === '' || key === 'API_KEY';
+    
+    if (isMissing) {
+      addLog("AUTH_ERR: UPLINK_KEY_MISSING");
+      return false;
+    }
+    return true;
+  }, [addLog]);
 
   useEffect(() => {
     if (currentUser) {
@@ -106,6 +118,18 @@ const App: React.FC = () => {
     setCurrentUser(user);
     setActiveTheme(user.preferredTheme || 'MK_85');
     addLog(`AUTH_SUCCESS: ${user.username}`);
+    
+    if (!validateApiKey()) {
+      setTimeout(() => {
+        setMessages(prev => [...prev, {
+          id: `sys-err-${Date.now()}`,
+          role: MessageRole.JARVIS,
+          text: "Sir, I'm detecting a severe configuration mismatch. The environment is lacking a valid API_KEY. Neural uplink will be restricted until fixed in the deployment dashboard settings.",
+          timestamp: Date.now(),
+          isError: true
+        }]);
+      }, 1500);
+    }
   };
 
   const handleLogout = () => {
@@ -127,6 +151,7 @@ const App: React.FC = () => {
   };
 
   const generateHologram = async (subject: string) => {
+    if (!validateApiKey()) return;
     addLog(`INIT_PROJECTION: ${subject}`);
     setState(prev => ({ ...prev, isProcessing: true, hologram: { subject, imageUrl: null } }));
     
@@ -167,147 +192,27 @@ const App: React.FC = () => {
 
   const handleSendMessage = async (text: string, imageData?: string) => {
     if (!text.trim() && !imageData) return;
-    const userMsg: Message = { id: `u-${Date.now()}`, role: MessageRole.USER, text, timestamp: Date.now(), image: imageData };
-    setMessages(prev => [...prev, userMsg]);
-    setState(prev => ({ ...prev, isProcessing: true }));
-
-    try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
-        contents: [...messages.slice(-8), userMsg].map(m => ({
-          role: m.role === MessageRole.USER ? 'user' : 'model',
-          parts: [{ text: m.text }]
-        })),
-        config: {
-          systemInstruction: JARVIS_SYSTEM_INSTRUCTION,
-          tools: [{ functionDeclarations: [HOLOGRAM_TOOL] }, { googleSearch: {} }]
-        }
-      });
-
-      if (response.functionCalls) {
-        for (const fc of response.functionCalls) {
-          if (fc.name === 'generate_hologram') {
-            await generateHologram((fc.args as any).subject);
-          }
-        }
-      }
-
+    if (!validateApiKey()) {
       setMessages(prev => [...prev, {
-        id: `j-${Date.now()}`,
-        role: MessageRole.JARVIS,
-        text: response.text || 'Calculations complete, Sir.',
+        id: `u-${Date.now()}`,
+        role: MessageRole.USER,
+        text,
         timestamp: Date.now(),
-        groundingLinks: response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((c: any) => ({
-          title: c.web?.title || 'Data Source',
-          uri: c.web?.uri || '#'
-        }))
+        image: imageData
+      }, {
+        id: `err-key-${Date.now()}`,
+        role: MessageRole.JARVIS,
+        text: "Neural uplink failed. Please check the API_KEY environment variable in your dashboard and trigger a new deploy.",
+        timestamp: Date.now(),
+        isError: true
       }]);
-    } catch (e) {
-      setMessages(prev => [...prev, { id: `err-${Date.now()}`, role: MessageRole.JARVIS, text: ERROR_MESSAGES.GENERIC, timestamp: Date.now(), isError: true }]);
-    } finally {
-      setState(prev => ({ ...prev, isProcessing: false }));
-    }
-  };
-
-  const toggleVoice = async () => {
-    if (state.isVoiceEnabled) {
-      sessionRef.current?.close();
-      setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false }));
       return;
     }
 
+    const userMsg: Message = { id: `u-${Date.now()}`, role: MessageRole.USER, text, timestamp: Date.now(), image: imageData };
+    setMessages(prev => [...prev, userMsg]);
+    setState(prev => ({ ...prev, isProcessing: true }));
+    addLog("API_CALL_INIT");
+
     try {
-      if (!outAudioCtxRef.current) {
-        outAudioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-        analyzerRef.current = outAudioCtxRef.current.createAnalyser();
-        analyzerRef.current.connect(outAudioCtxRef.current.destination);
-      }
-      
-      if (outAudioCtxRef.current.state === 'suspended') {
-        await outAudioCtxRef.current.resume();
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-      
-      const sessionPromise = ai.live.connect({
-        model: 'gemini-2.5-flash-native-audio-preview-12-2025',
-        callbacks: {
-          onopen: () => setState(prev => ({ ...prev, isVoiceEnabled: true, isListening: true })),
-          onmessage: async (msg: LiveServerMessage) => {
-            const base64Audio = msg.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
-            if (base64Audio && outAudioCtxRef.current) {
-              nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outAudioCtxRef.current.currentTime);
-              const audioBuffer = await decodeAudioData(decode(base64Audio), outAudioCtxRef.current, 24000, 1);
-              const source = outAudioCtxRef.current.createBufferSource();
-              source.buffer = audioBuffer;
-              source.connect(analyzerRef.current!);
-              source.start(nextStartTimeRef.current);
-              nextStartTimeRef.current += audioBuffer.duration;
-              setState(prev => ({ ...prev, isSpeaking: true }));
-              source.onended = () => setState(prev => ({ ...prev, isSpeaking: false }));
-            }
-          },
-          onclose: () => setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false })),
-          onerror: (e) => addLog(`VOICE_ERR: ${e.error || 'Connection Lost'}`)
-        },
-        config: { 
-          responseModalities: [Modality.AUDIO],
-          systemInstruction: JARVIS_SYSTEM_INSTRUCTION
-        }
-      });
-      sessionRef.current = await sessionPromise;
-    } catch (e) {
-      addLog("MIC_ACCESS_DENIED");
-    }
-  };
-
-  if (!currentUser) return <AuthPage onLogin={handleLogin} />;
-
-  return (
-    <div className={`flex h-screen w-screen bg-[#020617] text-slate-200 overflow-hidden select-none`}>
-      <Sidebar memory={state.memory} mode={state.currentMode} apiLogs={state.apiLogs} theme={activeTheme} onThemeChange={changeTheme} />
-      <main className="flex-1 flex flex-col relative overflow-hidden">
-        <Header speaking={state.isSpeaking} listening={state.isListening} user={currentUser} theme={activeTheme} onLogout={handleLogout} />
-        <div className="flex-1 relative flex flex-col">
-          {state.hologram && (
-            <div className="absolute inset-0 z-50 bg-black/90 backdrop-blur-xl animate-in fade-in flex flex-col">
-              <div className="p-10 flex justify-between items-center z-10">
-                <h2 className="mono text-2xl font-black text-cyan-400">{state.hologram.subject}</h2>
-                <button onClick={() => setState(s => ({...s, hologram: null}))} className="mono border-2 border-cyan-500/50 px-6 py-2 rounded-full hover:bg-cyan-500/10">CLOSE_PROJECTION</button>
-              </div>
-              <div className="flex-1">
-                {state.hologram.imageUrl && <HologramStage imageUrl={state.hologram.imageUrl} subject={state.hologram.subject} color={THEMES[activeTheme].primary} />}
-                {!state.hologram.imageUrl && (
-                  <div className="flex-1 flex items-center justify-center animate-pulse">
-                     <span className="mono text-cyan-400 text-lg uppercase tracking-[0.5em]">Initializing_Spatial_Tensors...</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-          <div className="absolute inset-0 opacity-20 pointer-events-none">
-            <JarvisCore active={state.isProcessing || state.isSpeaking} theme={activeTheme} speaking={state.isSpeaking} />
-          </div>
-          <div className="flex-1 px-8 py-4 overflow-hidden z-10">
-            <ChatWindow messages={messages} isProcessing={state.isProcessing} theme={activeTheme} />
-          </div>
-        </div>
-        <ControlPanel 
-          onSend={handleSendMessage}
-          isProcessing={state.isProcessing}
-          isVoiceEnabled={state.isVoiceEnabled}
-          isListening={state.isListening}
-          theme={activeTheme}
-          onVoiceToggle={toggleVoice}
-          onModeChange={(m) => setState(s => ({...s, currentMode: m}))}
-          onManualHologram={generateHologram}
-        />
-      </main>
-      <div className="crt-overlay" />
-    </div>
-  );
-};
-
-export default App;
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string
