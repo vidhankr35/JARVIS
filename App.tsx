@@ -78,7 +78,6 @@ const App: React.FC = () => {
     setState(prev => ({ ...prev, apiLogs: [log, ...prev.apiLogs].slice(0, 20) }));
   }, []);
 
-  // Save/Load messages for specific user
   useEffect(() => {
     if (currentUser) {
       const saved = localStorage.getItem(`chat_${currentUser.username}`);
@@ -128,21 +127,41 @@ const App: React.FC = () => {
   };
 
   const generateHologram = async (subject: string) => {
-    setState(prev => ({ ...prev, hologram: { subject, imageUrl: null } }));
+    addLog(`INIT_PROJECTION: ${subject}`);
+    setState(prev => ({ ...prev, isProcessing: true, hologram: { subject, imageUrl: null } }));
+    
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: { 
-          parts: [{ text: `3D holographic wireframe of ${subject}, tech blueprint style, monochromatic ${THEMES[activeTheme].primary}.` }] 
+          parts: [{ text: `3D holographic wireframe of ${subject}, technical blueprint style, monochromatic ${THEMES[activeTheme].primary} lighting, glowing lines on black background.` }] 
         }
       });
+      
       const imgPart = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
       if (imgPart?.inlineData) {
-        setState(prev => ({ ...prev, hologram: { subject, imageUrl: `data:image/png;base64,${imgPart.inlineData.data}` } }));
+        setState(prev => ({ 
+          ...prev, 
+          isProcessing: false,
+          hologram: { subject, imageUrl: `data:image/png;base64,${imgPart.inlineData.data}` } 
+        }));
+        addLog(`PROJECTION_READY: ${subject}`);
+      } else {
+        throw new Error("EMPTY_DATA_PACKET");
       }
     } catch (e) {
-      setState(prev => ({ ...prev, hologram: null }));
+      console.error("Hologram Error:", e);
+      setState(prev => ({ ...prev, isProcessing: false, hologram: null }));
+      addLog(`PROJECTION_FAIL: ${subject}`);
+      
+      setMessages(prev => [...prev, { 
+        id: `err-holo-${Date.now()}`, 
+        role: MessageRole.JARVIS, 
+        text: ERROR_MESSAGES.PROJECTION_FAILED, 
+        timestamp: Date.now(),
+        isError: true 
+      }]);
     }
   };
 
@@ -168,7 +187,9 @@ const App: React.FC = () => {
 
       if (response.functionCalls) {
         for (const fc of response.functionCalls) {
-          if (fc.name === 'generate_hologram') generateHologram((fc.args as any).subject);
+          if (fc.name === 'generate_hologram') {
+            await generateHologram((fc.args as any).subject);
+          }
         }
       }
 
@@ -258,6 +279,11 @@ const App: React.FC = () => {
               </div>
               <div className="flex-1">
                 {state.hologram.imageUrl && <HologramStage imageUrl={state.hologram.imageUrl} subject={state.hologram.subject} color={THEMES[activeTheme].primary} />}
+                {!state.hologram.imageUrl && (
+                  <div className="flex-1 flex items-center justify-center animate-pulse">
+                     <span className="mono text-cyan-400 text-lg uppercase tracking-[0.5em]">Initializing_Spatial_Tensors...</span>
+                  </div>
+                )}
               </div>
             </div>
           )}

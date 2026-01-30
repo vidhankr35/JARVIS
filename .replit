@@ -1,0 +1,8 @@
+
+run = "if [ ! -d 'node_modules' ]; then npm install; fi && npm run build && python main.py"
+
+[languages.typescript]
+pattern = "**/*.ts"
+
+[deployment]
+run = "npm run build && python main.py"
