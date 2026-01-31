@@ -43,6 +43,7 @@ export interface JarvisState {
   isVoiceEnabled: boolean;
   isThinkingMode: boolean; // For complex reasoning
   isSearchEnabled: boolean; // For web grounding
+  isSimulationActive: boolean; // New: For holographic overlays
   currentMode: 'standard' | 'scientific' | 'engineering';
   memory: string[];
 }

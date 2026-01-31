@@ -17,6 +17,8 @@ interface ControlPanelProps {
   isSearchEnabled?: boolean;
   onToggleThinking?: () => void;
   onToggleSearch?: () => void;
+  isSimulationActive?: boolean;
+  onToggleSimulation?: () => void;
 }
 
 const ControlPanel: React.FC<ControlPanelProps> = ({ 
@@ -32,7 +34,9 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   isThinkingMode,
   isSearchEnabled,
   onToggleThinking,
-  onToggleSearch
+  onToggleSearch,
+  isSimulationActive,
+  onToggleSimulation
 }) => {
   const [input, setInput] = useState('');
   const [imagePreview, setImagePreview] = useState<string | null>(null);
@@ -98,6 +102,13 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             title="Enable High-Level Reasoning (Thinking Mode)"
           >
             REASONING
+          </button>
+          <button 
+            onClick={onToggleSimulation}
+            className={`flex-1 sm:flex-none px-3 py-1.5 text-[8px] mono rounded border transition-all flex items-center justify-center gap-2 whitespace-nowrap ${isSimulationActive ? 'bg-cyan-500/20 border-cyan-400 text-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.3)]' : 'border-slate-700 text-slate-500'}`}
+            title="Enable Simulation Visualization"
+          >
+            SIMULATION
           </button>
           <div className="w-[1px] h-4 bg-white/10 mx-1" />
           <button 

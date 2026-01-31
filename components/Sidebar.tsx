@@ -14,6 +14,8 @@ interface SidebarProps {
   isSearchEnabled?: boolean;
   onToggleThinking?: () => void;
   onToggleSearch?: () => void;
+  isSimulationActive?: boolean;
+  onToggleSimulation?: () => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({ 
@@ -25,7 +27,9 @@ const Sidebar: React.FC<SidebarProps> = ({
   isThinkingMode,
   isSearchEnabled,
   onToggleThinking,
-  onToggleSearch
+  onToggleSearch,
+  isSimulationActive,
+  onToggleSimulation
 }) => {
   const [activeTab, setActiveTab] = useState<'monitor' | 'neural' | 'archive'>('monitor');
   const themeColors = THEMES[theme];
@@ -93,6 +97,15 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <span className={`mono text-[10px] ${isSearchEnabled ? 'text-cyan-400' : 'opacity-40'}`}>Web_Grounding</span>
                 <div className={`w-8 h-4 rounded-full p-1 transition-all ${isSearchEnabled ? 'bg-cyan-500' : 'bg-white/10'}`}>
                   <div className={`w-2 h-2 rounded-full bg-white transition-all ${isSearchEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                </div>
+              </button>
+              <button 
+                onClick={onToggleSimulation}
+                className={`w-full flex justify-between items-center p-3 rounded-xl border transition-all ${isSimulationActive ? 'bg-cyan-500/10 border-cyan-500/50 shadow-[inset_0_0_10px_rgba(34,211,238,0.1)]' : 'border-white/5'}`}
+              >
+                <span className={`mono text-[10px] ${isSimulationActive ? 'text-cyan-400' : 'opacity-40'}`}>Simulation_Mode</span>
+                <div className={`w-8 h-4 rounded-full p-1 transition-all ${isSimulationActive ? 'bg-cyan-500' : 'bg-white/10'}`}>
+                  <div className={`w-2 h-2 rounded-full bg-white transition-all ${isSimulationActive ? 'translate-x-4' : 'translate-x-0'}`} />
                 </div>
               </button>
             </section>

@@ -7,17 +7,20 @@ interface HologramStageProps {
   subject: string;
   scale?: number;
   color?: string;
+  simulationActive?: boolean;
 }
 
 const HologramStage: React.FC<HologramStageProps> = ({ 
   imageUrl, 
   subject, 
   scale = 1, 
-  color = '#22d3ee' 
+  color = '#22d3ee',
+  simulationActive = false
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const hologramRef = useRef<THREE.Mesh | null>(null);
   const ghostRef = useRef<THREE.Mesh | null>(null);
+  const simulationGroupRef = useRef<THREE.Group | null>(null);
   
   // Interaction State Tracking
   const isDragging = useRef(false);
@@ -49,7 +52,7 @@ const HologramStage: React.FC<HologramStageProps> = ({
     grid.position.y = -2;
     scene.add(grid);
 
-    // Volumetric Light Beam (Cone)
+    // Volumetric Light Beam
     const beamGeo = new THREE.CylinderGeometry(0.1, 4, 10, 32, 1, true);
     const beamMat = new THREE.MeshBasicMaterial({
       color: themeColor,
@@ -88,7 +91,7 @@ const HologramStage: React.FC<HologramStageProps> = ({
     const particles = new THREE.Points(particleGeo, particleMat);
     scene.add(particles);
 
-    // The Main Hologram Image
+    // Main Hologram Mesh
     const texture = new THREE.TextureLoader().load(imageUrl);
     const planeGeo = new THREE.PlaneGeometry(4, 4);
     const planeMat = new THREE.MeshBasicMaterial({
@@ -107,7 +110,13 @@ const HologramStage: React.FC<HologramStageProps> = ({
     scene.add(hologram);
     hologramRef.current = hologram;
 
-    // Ghost Frame for Chromatic Aberration Effect
+    // Simulation Overlays Group
+    const simGroup = new THREE.Group();
+    simGroup.position.y = 1;
+    scene.add(simGroup);
+    simulationGroupRef.current = simGroup;
+
+    // Ghost Frame for Chromatic Aberration
     const ghostMat = planeMat.clone();
     ghostMat.opacity = 0.2;
     const ghost = new THREE.Mesh(planeGeo, ghostMat);
@@ -116,37 +125,72 @@ const HologramStage: React.FC<HologramStageProps> = ({
     scene.add(ghost);
     ghostRef.current = ghost;
 
+    // Create Subject-Specific Simulation Elements
+    const sub = subject.toLowerCase();
+    
+    // 1. Data Rings (Expanders)
+    const ringGeo = new THREE.TorusGeometry(2, 0.02, 16, 100);
+    const ringMat = new THREE.MeshBasicMaterial({ color: themeColor, transparent: true, opacity: 0.4 });
+    const rings: THREE.Mesh[] = [];
+    for(let i=0; i<3; i++) {
+      const r = new THREE.Mesh(ringGeo, ringMat);
+      r.rotation.x = Math.PI/2;
+      r.visible = false;
+      simGroup.add(r);
+      rings.push(r);
+    }
+
+    // 2. Specialized Elements
+    const specElements: THREE.Object3D[] = [];
+    if (sub.includes('molecule') || sub.includes('atom') || sub.includes('chemical')) {
+      // Orbiting Electrons
+      for(let i=0; i<4; i++) {
+        const orbit = new THREE.Group();
+        const electron = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), new THREE.MeshBasicMaterial({ color: themeColor }));
+        electron.position.x = 2.2 + Math.random();
+        orbit.add(electron);
+        orbit.rotation.z = Math.random() * Math.PI;
+        orbit.rotation.y = Math.random() * Math.PI;
+        simGroup.add(orbit);
+        specElements.push(orbit);
+      }
+    } else if (sub.includes('engine') || sub.includes('reactor') || sub.includes('core')) {
+      // Heat Glow / Energy Pulses
+      const pulseGeo = new THREE.SphereGeometry(2, 32, 32);
+      const pulseMat = new THREE.MeshBasicMaterial({ color: '#ff4400', transparent: true, opacity: 0.15, side: THREE.BackSide });
+      const pulse = new THREE.Mesh(pulseGeo, pulseMat);
+      simGroup.add(pulse);
+      specElements.push(pulse);
+    } else {
+      // Default: Floating HUD text/data particles
+      const textGroup = new THREE.Group();
+      for(let i=0; i<20; i++) {
+        const dot = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.01), new THREE.MeshBasicMaterial({ color: themeColor }));
+        dot.position.set((Math.random()-0.5)*5, (Math.random()-0.5)*5, (Math.random()-0.5)*2);
+        textGroup.add(dot);
+      }
+      simGroup.add(textGroup);
+      specElements.push(textGroup);
+    }
+
     // Interaction Listeners
     const handleMouseDown = (e: MouseEvent) => {
       isDragging.current = true;
       previousMousePosition.current = { x: e.clientX, y: e.clientY };
     };
-
     const handleMouseMove = (e: MouseEvent) => {
       if (!isDragging.current) return;
-      
       const deltaX = e.clientX - previousMousePosition.current.x;
       const deltaY = e.clientY - previousMousePosition.current.y;
-      
-      // Update target rotation based on movement
       targetRotation.current.y += deltaX * 0.005;
       targetRotation.current.x += deltaY * 0.005;
-      
-      // Clamp vertical rotation slightly to prevent flip
       targetRotation.current.x = Math.max(Math.min(targetRotation.current.x, Math.PI / 4), -Math.PI / 4);
-      
       previousMousePosition.current = { x: e.clientX, y: e.clientY };
     };
-
-    const handleMouseUp = () => {
-      isDragging.current = false;
-    };
-
+    const handleMouseUp = () => { isDragging.current = false; };
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
-      const zoomSpeed = 0.001;
-      targetZoom.current -= e.deltaY * zoomSpeed;
-      // Clamp zoom to reasonable levels
+      targetZoom.current -= e.deltaY * 0.001;
       targetZoom.current = Math.max(0.1, Math.min(targetZoom.current, 3));
     };
 
@@ -162,17 +206,14 @@ const HologramStage: React.FC<HologramStageProps> = ({
     const animate = () => {
       frame = requestAnimationFrame(animate);
       const elapsed = clock.getElapsedTime();
-      const dt = clock.getDelta();
       
-      // Smoothly interpolate current values to target values (lerping)
       currentRotation.current.x += (targetRotation.current.x - currentRotation.current.x) * 0.1;
       currentRotation.current.y += (targetRotation.current.y - currentRotation.current.y) * 0.1;
       currentZoom.current += (targetZoom.current - currentZoom.current) * 0.1;
 
-      // Update Mesh states
-      if (hologramRef.current && ghostRef.current) {
-        const floatY = 1 + Math.sin(elapsed * 2) * 0.1;
-        
+      const floatY = 1 + Math.sin(elapsed * 2) * 0.1;
+
+      if (hologramRef.current && ghostRef.current && simulationGroupRef.current) {
         hologramRef.current.position.y = floatY;
         hologramRef.current.rotation.x = currentRotation.current.x;
         hologramRef.current.rotation.y = currentRotation.current.y;
@@ -182,12 +223,42 @@ const HologramStage: React.FC<HologramStageProps> = ({
         ghostRef.current.rotation.x = currentRotation.current.x;
         ghostRef.current.rotation.y = currentRotation.current.y;
         ghostRef.current.scale.setScalar(currentZoom.current * 1.05);
-        
-        // Minor "glitch" jitter on the ghost frame
         ghostRef.current.position.x = Math.sin(elapsed * 15) * 0.03; 
+
+        simulationGroupRef.current.position.y = floatY;
+        simulationGroupRef.current.rotation.x = currentRotation.current.x;
+        simulationGroupRef.current.rotation.y = currentRotation.current.y;
+        simulationGroupRef.current.scale.setScalar(currentZoom.current);
       }
 
-      // Particles rising from emitter
+      // Simulation specific logic
+      if (simulationActive) {
+        simGroup.visible = true;
+        // Animate expander rings
+        rings.forEach((r, i) => {
+          r.visible = true;
+          const phase = (elapsed * 0.5 + i * 0.3) % 1;
+          r.scale.setScalar(0.5 + phase * 2.5);
+          (r.material as THREE.MeshBasicMaterial).opacity = 0.5 * (1 - phase);
+        });
+
+        // Animate subject-specific elements
+        specElements.forEach((el, i) => {
+          if (sub.includes('molecule') || sub.includes('atom')) {
+            el.rotation.y += 0.05 * (i+1);
+            el.rotation.z += 0.03 * (i+1);
+          } else if (sub.includes('engine') || sub.includes('reactor')) {
+            const p = el as THREE.Mesh;
+            p.scale.setScalar(0.9 + Math.sin(elapsed * 4) * 0.1);
+            (p.material as THREE.MeshBasicMaterial).opacity = 0.1 + Math.sin(elapsed * 4) * 0.05;
+          } else {
+            el.position.y = Math.sin(elapsed * 0.5 + i) * 0.2;
+          }
+        });
+      } else {
+        simGroup.visible = false;
+      }
+
       const positions = particleGeo.attributes.position.array as Float32Array;
       for (let i = 0; i < particleCount; i++) {
         positions[i * 3 + 1] += 0.01;
@@ -195,7 +266,6 @@ const HologramStage: React.FC<HologramStageProps> = ({
       }
       particleGeo.attributes.position.needsUpdate = true;
       
-      // Flickering effect logic
       if (Math.random() > 0.985) {
         hologram.visible = false;
         setTimeout(() => { if (hologramRef.current) hologramRef.current.visible = true; }, 40);
@@ -224,12 +294,7 @@ const HologramStage: React.FC<HologramStageProps> = ({
       renderer.dispose();
       if (containerRef.current) containerRef.current.removeChild(renderer.domElement);
     };
-  }, [imageUrl, color]);
-
-  // Sync target zoom if external scale prop changes
-  useEffect(() => {
-    targetZoom.current = scale;
-  }, [scale]);
+  }, [imageUrl, color, simulationActive, subject]);
 
   return (
     <div 

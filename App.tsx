@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration, GenerateContentResponse, Chat, GroundingLink } from '@google/genai';
-import { Message, MessageRole, JarvisState, User, SubscriptionLevel, JarvisTheme } from './types';
+import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration, GenerateContentResponse, Chat } from '@google/genai';
+import { Message, MessageRole, JarvisState, User, SubscriptionLevel, JarvisTheme, GroundingLink } from './types';
 import { JARVIS_SYSTEM_INSTRUCTION, INITIAL_GREETING, ERROR_MESSAGES, THEMES, PRIME_USERS } from './constants';
 import Header from './components/Header';
 import ChatWindow from './components/ChatWindow';
@@ -38,9 +38,11 @@ async function decodeAudioData(
   sampleRate: number,
   numChannels: number,
 ): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
+  // Ensure the buffer is correctly aligned for Int16Array (16-bit PCM)
+  const dataInt16 = new Int16Array(data.buffer, data.byteOffset, data.byteLength / 2);
   const frameCount = dataInt16.length / numChannels;
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
+  
   for (let channel = 0; channel < numChannels; channel++) {
     const channelData = buffer.getChannelData(channel);
     for (let i = 0; i < frameCount; i++) {
@@ -85,6 +87,7 @@ const App: React.FC = () => {
     isVoiceEnabled: false,
     isThinkingMode: false,
     isSearchEnabled: false,
+    isSimulationActive: false,
     currentMode: 'scientific',
     memory: ["Neural link calibrated.", "Stark Gateway Online."],
     apiLogs: ["CORE_READY", "API_V1_INIT"],
@@ -198,13 +201,10 @@ const App: React.FC = () => {
     chatSessionRef.current = null;
     setCurrentUser(null);
     setMessages([]);
-    setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false, isSpeaking: false, hologram: null }));
+    setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false, isSpeaking: false, hologram: null, isSimulationActive: false }));
     addLog("SESSION_TERMINATED");
   }, [addLog]);
 
-  /**
-   * Generates a 3D-style schematic using the image generation model
-   */
   const generateHologramImage = async (subject: string) => {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
@@ -233,9 +233,6 @@ const App: React.FC = () => {
     }
   };
 
-  /**
-   * Handles text-based commands and multi-modal image scanning
-   */
   const handleSend = async (text: string, imageData?: string) => {
     if (!chatSessionRef.current) initChatSession();
     if (!chatSessionRef.current) return;
@@ -265,7 +262,7 @@ const App: React.FC = () => {
           },
         };
         streamResponse = await chatSessionRef.current.sendMessageStream({
-          message: { parts: [imagePart, { text }] }
+          message: [imagePart, { text }]
         });
       } else {
         streamResponse = await chatSessionRef.current.sendMessageStream({ message: text });
@@ -280,7 +277,6 @@ const App: React.FC = () => {
         fullText += textChunk;
         setStreamingText(fullText);
 
-        // Handle grounding metadata
         if (c.candidates?.[0]?.groundingMetadata?.groundingChunks) {
           const chunks = c.candidates[0].groundingMetadata.groundingChunks;
           chunks.forEach((chunk: any) => {
@@ -292,7 +288,6 @@ const App: React.FC = () => {
           });
         }
 
-        // Handle hologram function calling
         if (c.functionCalls) {
           for (const fc of c.functionCalls) {
             if (fc.name === 'generate_hologram') {
@@ -329,9 +324,6 @@ const App: React.FC = () => {
     }
   };
 
-  /**
-   * Initializes and handles the Live Voice API interaction
-   */
   const toggleVoice = async () => {
     if (state.isVoiceEnabled) {
       sessionRef.current?.close();
@@ -347,9 +339,13 @@ const App: React.FC = () => {
     try {
       addLog("VOICE_LINK: INIT");
       setState(prev => ({ ...prev, isVoiceEnabled: true, isProcessing: true }));
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+      
+      // Initialize Contexts
       outAudioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       inAudioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      nextStartTimeRef.current = 0; // Reset scheduling clock
+
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
       const sessionPromise = ai.live.connect({
@@ -378,10 +374,12 @@ const App: React.FC = () => {
             
             source.connect(scriptProcessor);
             scriptProcessor.connect(inAudioCtxRef.current!.destination);
+            
             sessionRef.current = { close: () => { 
                 scriptProcessor.disconnect();
                 source.disconnect();
                 stream.getTracks().forEach(track => track.stop());
+                addLog("VOICE_NODE: DISCONNECTED");
             }};
           },
           onmessage: async (message: LiveServerMessage) => {
@@ -389,25 +387,34 @@ const App: React.FC = () => {
               const base64Audio = message.serverContent.modelTurn.parts[0].inlineData.data;
               setState(prev => ({ ...prev, isSpeaking: true }));
               
+              // Ensure next chunk starts exactly after previous, or now if we're behind
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outAudioCtxRef.current!.currentTime);
+              
               const audioBuffer = await decodeAudioData(decode(base64Audio), outAudioCtxRef.current!, 24000, 1);
               const source = outAudioCtxRef.current!.createBufferSource();
               source.buffer = audioBuffer;
               source.connect(outAudioCtxRef.current!.destination);
+              
               source.onended = () => {
                 audioSourcesRef.current.delete(source);
-                if (audioSourcesRef.current.size === 0) setState(prev => ({ ...prev, isSpeaking: false }));
+                if (audioSourcesRef.current.size === 0) {
+                  setState(prev => ({ ...prev, isSpeaking: false }));
+                }
               };
+              
               source.start(nextStartTimeRef.current);
               nextStartTimeRef.current += audioBuffer.duration;
               audioSourcesRef.current.add(source);
             }
             
             if (message.serverContent?.interrupted) {
-                audioSourcesRef.current.forEach(s => s.stop());
+                audioSourcesRef.current.forEach(s => {
+                  try { s.stop(); } catch (e) {}
+                });
                 audioSourcesRef.current.clear();
-                nextStartTimeRef.current = 0;
+                nextStartTimeRef.current = outAudioCtxRef.current?.currentTime || 0;
                 setState(prev => ({ ...prev, isSpeaking: false }));
+                addLog("COMMS: INTERRUPTED");
             }
 
             if (message.serverContent?.inputTranscription) {
@@ -422,11 +429,11 @@ const App: React.FC = () => {
             }
             if (message.serverContent?.turnComplete) {
                 transcriptionRef.current = { user: '', jarvis: '' };
-                setTimeout(() => setLiveTranscript({ user: '', jarvis: '' }), 3000);
+                setTimeout(() => setLiveTranscript({ user: '', jarvis: '' }), 4000);
             }
           },
           onerror: (e: any) => {
-            addLog(`VOICE_ERR: ${e.message || 'Unknown network fault'}`);
+            addLog(`VOICE_ERR: ${e.message || 'Signal lost'}`);
             setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false, isSpeaking: false }));
           },
           onclose: () => {
@@ -477,6 +484,8 @@ const App: React.FC = () => {
                 isSearchEnabled={state.isSearchEnabled}
                 onToggleThinking={() => setState(s => ({ ...s, isThinkingMode: !s.isThinkingMode, isSearchEnabled: false }))}
                 onToggleSearch={() => setState(s => ({ ...s, isSearchEnabled: !s.isSearchEnabled, isThinkingMode: false }))}
+                isSimulationActive={state.isSimulationActive}
+                onToggleSimulation={() => setState(s => ({ ...s, isSimulationActive: !s.isSimulationActive }))}
               />
             )}
 
@@ -493,6 +502,8 @@ const App: React.FC = () => {
                     isSearchEnabled={state.isSearchEnabled}
                     onToggleThinking={() => { setState(s => ({ ...s, isThinkingMode: !s.isThinkingMode, isSearchEnabled: false })); setIsSidebarOpen(false); }}
                     onToggleSearch={() => { setState(s => ({ ...s, isSearchEnabled: !s.isSearchEnabled, isThinkingMode: false })); setIsSidebarOpen(false); }}
+                    isSimulationActive={state.isSimulationActive}
+                    onToggleSimulation={() => setState(s => ({ ...s, isSimulationActive: !s.isSimulationActive }))}
                   />
                 </div>
               </div>
@@ -506,13 +517,22 @@ const App: React.FC = () => {
                         imageUrl={state.hologram.imageUrl!} 
                         subject={state.hologram.subject} 
                         color={THEMES[activeTheme].primary}
+                        simulationActive={state.isSimulationActive}
                       />
-                      <button 
-                        onClick={() => setState(s => ({ ...s, hologram: null }))}
-                        className="absolute top-4 right-4 px-4 py-2 glass rounded-full text-[10px] mono text-cyan-400 border border-cyan-400/20 hover:bg-cyan-400/10 transition-all z-50 uppercase tracking-widest"
-                      >
-                        Terminate_Projection
-                      </button>
+                      <div className="absolute top-4 right-4 flex gap-2 z-50">
+                        <button 
+                          onClick={() => setState(s => ({ ...s, isSimulationActive: !s.isSimulationActive }))}
+                          className={`px-4 py-2 glass rounded-full text-[10px] mono border transition-all uppercase tracking-widest ${state.isSimulationActive ? 'bg-cyan-400/20 border-cyan-400 text-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.4)]' : 'border-white/20 text-slate-400'}`}
+                        >
+                          Simulation_Mode: {state.isSimulationActive ? 'ON' : 'OFF'}
+                        </button>
+                        <button 
+                          onClick={() => setState(s => ({ ...s, hologram: null }))}
+                          className="px-4 py-2 glass rounded-full text-[10px] mono text-red-400 border border-red-400/20 hover:bg-red-400/10 transition-all uppercase tracking-widest"
+                        >
+                          Terminate_Projection
+                        </button>
+                      </div>
                    </div>
                  ) : showApiConsole ? (
                    <ApiConsole payload={lastPayload} logs={state.apiLogs} theme={activeTheme} />
@@ -543,6 +563,8 @@ const App: React.FC = () => {
                 isSearchEnabled={state.isSearchEnabled}
                 onToggleThinking={() => setState(s => ({ ...s, isThinkingMode: !s.isThinkingMode, isSearchEnabled: false }))}
                 onToggleSearch={() => setState(s => ({ ...s, isSearchEnabled: !s.isSearchEnabled, isThinkingMode: false }))}
+                isSimulationActive={state.isSimulationActive}
+                onToggleSimulation={() => setState(s => ({ ...s, isSimulationActive: !s.isSimulationActive }))}
               />
             </main>
 
