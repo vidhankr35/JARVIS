@@ -12,14 +12,16 @@ import HologramStage from './components/HologramStage';
 import AuthPage from './components/AuthPage';
 import ApiConsole from './components/ApiConsole';
 
-// Global declaration for Vercel/TSC build to recognize Vite-defined process.env
-declare var process: {
-  env: {
-    API_KEY: string;
-  };
-};
+// Precise build-time environment declarations
+declare global {
+  namespace NodeJS {
+    interface ProcessEnv {
+      API_KEY: string;
+    }
+  }
+}
 
-function encode(bytes: Uint8Array) {
+function encode(bytes: Uint8Array): string {
   let binary = '';
   const len = bytes.byteLength;
   for (let i = 0; i < len; i++) {
@@ -28,7 +30,7 @@ function encode(bytes: Uint8Array) {
   return btoa(binary);
 }
 
-function decode(base64: string) {
+function decode(base64: string): Uint8Array {
   const binaryString = atob(base64);
   const len = binaryString.length;
   const bytes = new Uint8Array(len);
@@ -121,9 +123,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     validateApiKey();
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, [validateApiKey]);
@@ -143,9 +143,9 @@ const App: React.FC = () => {
       };
 
       chatSessionRef.current = ai.chats.create({ model: modelName, config });
-      addLog(`NEURAL_INIT: ${modelName.toUpperCase()} SUCCESS`);
+      addLog(`PROTOCOL_SYNC: ${modelName.toUpperCase()} ACTIVE`);
     } catch (error: any) {
-      addLog(`CORE_ERR: ${error.message}`);
+      addLog(`SYNAPSE_FAULT: ${error.message}`);
     }
   }, [validateApiKey, state.temperature, state.isThinkingMode, state.isSearchEnabled, addLog]);
 
@@ -157,9 +157,9 @@ const App: React.FC = () => {
     setCurrentUser(user);
     if (user.preferredTheme) setActiveTheme(user.preferredTheme);
     const profile = Object.values(PRIME_USERS).find(p => p.name.toUpperCase() === user.username.toUpperCase());
-    const greeting = profile ? INITIAL_GREETING(profile.name, profile.specialization) : INITIAL_GREETING(user.username, "General Intelligence");
+    const greeting = profile ? INITIAL_GREETING(profile.name, profile.specialization) : INITIAL_GREETING(user.username, "General Systems");
     setMessages([{ id: `init-${Date.now()}`, role: MessageRole.JARVIS, text: greeting, timestamp: Date.now() }]);
-    addLog(`LOGIN_AUTH: ${user.username}`);
+    addLog(`IDENTITY_VERIFIED: ${user.username}`);
   };
 
   const handleLogout = () => {
@@ -168,15 +168,16 @@ const App: React.FC = () => {
     setCurrentUser(null);
     setMessages([]);
     setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false, isSpeaking: false, hologram: null }));
-    addLog("SESSION_RESET");
+    addLog("UPLINK_TERMINATED");
   };
 
   const generateHologramImage = async (subject: string) => {
+    if (!validateApiKey()) return;
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
-        contents: [{ parts: [{ text: `A blue holographic 3D schematic of ${subject}, stark industries style, on black background.` }] }],
+        contents: [{ parts: [{ text: `Highly detailed cyan 3D holographic blueprint of ${subject}, technical schematic style, dark background.` }] }],
         config: { imageConfig: { aspectRatio: "1:1" } }
       });
 
@@ -184,10 +185,11 @@ const App: React.FC = () => {
         if (part.inlineData) {
           const imageUrl = `data:image/png;base64,${part.inlineData.data}`;
           setState(prev => ({ ...prev, hologram: { subject, imageUrl } }));
+          addLog(`VISUAL_RENDERED: ${subject.toUpperCase()}`);
           break;
         }
       }
-    } catch (e: any) { addLog(`OPTIC_FAIL: ${e.message}`); }
+    } catch (e: any) { addLog(`OPTIC_ERR: ${e.message}`); }
   };
 
   const handleSend = async (text: string, imageData?: string) => {
@@ -195,11 +197,11 @@ const App: React.FC = () => {
     if (!chatSessionRef.current) return;
 
     setMessages(prev => [...prev, { id: `u-${Date.now()}`, role: MessageRole.USER, text, timestamp: Date.now(), image: imageData }]);
-    setState(prev => ({ ...prev, isProcessing: true, streamStatus: 'Analysing...' }));
+    setState(prev => ({ ...prev, isProcessing: true, streamStatus: 'Analyzing...' }));
     setStreamingText('');
 
     try {
-      const parts = imageData ? [{ inlineData: { mimeType: 'image/jpeg', data: imageData.split(',')[1] } }, { text }] : [{ text }];
+      const parts: any[] = imageData ? [{ inlineData: { mimeType: 'image/jpeg', data: imageData.split(',')[1] } }, { text }] : [{ text }];
       const streamResponse = await chatSessionRef.current.sendMessageStream({ message: parts });
 
       let fullText = '';
@@ -220,7 +222,6 @@ const App: React.FC = () => {
         if (chunk.functionCalls) {
           for (const fc of chunk.functionCalls) {
             if (fc.name === 'generate_hologram') {
-              addLog(`PROJECTION_INIT: ${fc.args.subject}`);
               generateHologramImage(fc.args.subject as string);
             }
           }
@@ -229,8 +230,9 @@ const App: React.FC = () => {
 
       setMessages(prev => [...prev, { id: `j-${Date.now()}`, role: MessageRole.JARVIS, text: fullText, timestamp: Date.now(), groundingLinks: links }]);
       setStreamingText('');
+      addLog("UPLINK_SUCCESS");
     } catch (error: any) {
-      addLog(`LINK_ERR: ${error.message}`);
+      addLog(`CORE_FAULT: ${error.message}`);
     } finally {
       setState(prev => ({ ...prev, isProcessing: false, streamStatus: null }));
     }
@@ -270,6 +272,7 @@ const App: React.FC = () => {
             source.connect(scriptProcessor);
             scriptProcessor.connect(inAudioCtxRef.current!.destination);
             sessionRef.current = { close: () => { scriptProcessor.disconnect(); source.disconnect(); stream.getTracks().forEach(t => t.stop()); } };
+            addLog("VOICE_UPLINK: ONLINE");
           },
           onmessage: async (msg: LiveServerMessage) => {
             if (msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data) {
@@ -306,6 +309,10 @@ const App: React.FC = () => {
               transcriptionRef.current = { user: '', jarvis: '' };
               setTimeout(() => setLiveTranscript({ user: '', jarvis: '' }), 4000);
             }
+          },
+          onerror: (e) => {
+            addLog(`UPLINK_ERR: ${e.toString()}`);
+            setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false, isSpeaking: false }));
           }
         },
         config: {
@@ -315,7 +322,10 @@ const App: React.FC = () => {
           inputAudioTranscription: {}, outputAudioTranscription: {}
         }
       });
-    } catch (e: any) { setState(prev => ({ ...prev, isVoiceEnabled: false, isProcessing: false })); }
+    } catch (e: any) { 
+      addLog(`COMMS_FAULT: ${e.message}`);
+      setState(prev => ({ ...prev, isVoiceEnabled: false, isProcessing: false })); 
+    }
   };
 
   return (

@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   define: {
-    // Allows the app to access the API_KEY from the environment
+    // Hardens the injection of the API_KEY for build stability
     'process.env.API_KEY': JSON.stringify(process.env.API_KEY || ''),
   },
   server: {
@@ -14,6 +14,16 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: false
+    sourcemap: false,
+    // Fixes the "chunk size limit" warning on Vercel
+    chunkSizeWarningLimit: 2000,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom', 'three'],
+          genai: ['@google/genai']
+        }
+      }
+    }
   }
 });
