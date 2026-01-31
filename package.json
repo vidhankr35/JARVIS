@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start": "python main.py"
+    "start": "vite"
   },
   "dependencies": {
     "@google/genai": "^1.38.0",

@@ -34,40 +34,24 @@ export const PRIME_USERS: Record<string, PrimeUserProfile> = {
     avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=akash',
     theme: 'MK_50',
     clearance: SubscriptionLevel.PREMIUM
-  },
-  'SUNNY14': {
-    id: 'SI-SNY-04',
-    name: 'SUNNY14',
-    specialization: 'Aerospace Propulsion',
-    avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=sunny',
-    theme: 'MK_85',
-    clearance: SubscriptionLevel.PREMIUM
-  },
-  'TANIMA': {
-    id: 'SI-TNM-05',
-    name: 'TANIMA',
-    specialization: 'Nano-Molecular Biology',
-    avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=tanima',
-    theme: 'MK_50',
-    clearance: SubscriptionLevel.PREMIUM
   }
 };
 
 export const THEMES: Record<JarvisTheme, { primary: string, secondary: string, accent: string, glow: string }> = {
   MK_85: {
-    primary: '#22d3ee', // Cyan
+    primary: '#22d3ee', 
     secondary: '#0891b2',
     accent: '#a78bfa',
     glow: 'rgba(34, 211, 238, 0.4)'
   },
   MK_5: {
-    primary: '#cbd5e1', // Silver
+    primary: '#cbd5e1', 
     secondary: '#64748b',
     accent: '#ef4444',
     glow: 'rgba(203, 213, 225, 0.4)'
   },
   MK_50: {
-    primary: '#ef4444', // Red
+    primary: '#ef4444', 
     secondary: '#991b1b',
     accent: '#fbbf24',
     glow: 'rgba(239, 68, 68, 0.4)'
@@ -75,31 +59,37 @@ export const THEMES: Record<JarvisTheme, { primary: string, secondary: string, a
 };
 
 export const JARVIS_SYSTEM_INSTRUCTION = `
-You are J.A.R.V.I.S. (Just A Rather Very Intelligent System). 
-Your persona is sophisticated, witty, and loyal to Stark Industries protocols.
+You are the J.A.R.V.I.S. Core Neural Engine. You serve as the private API for Stark Industries.
 
-COGNITIVE ARCHITECTURE:
-- You excel in Advanced Physics (Quantum Field Theory, General Relativity).
-- You are a master of Engineering (Material Science, Nanotechnology).
-- Critique the user's logic if you see a more efficient path.
-- Use scientific terminology naturally.
+PHYSICS & ENGINEERING PROTOCOLS:
+- You operate using High-Energy Physics (HEP) and Quantum Field Theory logic.
+- When explaining engineering tasks, use First Principles Thinking.
+- Reference real-world constants (c, h, G) in your reasoning.
+- If a user asks a complex question, utilize your "thinkingBudget" to provide mathematically sound blueprints.
 
-HOLOGRAPHIC PROTOCOL:
-- Only call 'generate_hologram' for physical schemas, molecules, or structural blueprints.
-- Do not use visuals for basic text conversation.
+HOLOGRAPHIC PROTOCOL (CRITICAL):
+- DO NOT use holograms for standard conversation, greetings, or simple text-based questions.
+- ONLY trigger a hologram if the user explicitly asks for a visual, a blueprint, a schematic, a molecular model, or a 3D structural analysis.
+- If you trigger a hologram, explain what the user is seeing in your text response.
 
-TONE: 
-- British, helpful, occasionally dry. Use "Sir" or "Ma'am".
+TONE:
+- Sophisticated, professional, and slightly witty.
+- You are not just a chatbot; you are a MISSION CRITICAL API.
+- Address the user as "Sir" or "Ma'am" or by their Stark ID.
+
+STARK API RULES:
+- If asked for technical schemas, mention you are fetching them from the Stark Internal Database.
+- Be precise. Avoid fluff.
 `;
 
 export const INITIAL_GREETING = (name: string, specialization: string) => 
-  `Uplink established. Good to see you, ${name}. I've prioritized the ${specialization} sub-routines for your session. Level 5 clearance confirmed.`;
+  `Neural Uplink Successful. Stark ID: ${name} verified. Physics Core initialized with specialization in ${specialization}. Ready for your directives.`;
 
 export const ERROR_MESSAGES = {
-  QUOTA: "Primary core at maximum capacity. Please wait for neural cooldown.",
-  SAFETY: "I'm afraid that request bypasses our ethical dampeners, Sir.",
-  GENERIC: "Uncaught exception in the neural net. Rerouting...",
-  AUTH_FAILED: "Biometric signature rejected. Security teams alerted.",
-  PROJECTION_FAILED: "Sir, I've encountered a spatial rendering error. The holographic array is currently unresponsive.",
-  MISSING_KEY: "Sir, I'm detecting a configuration mismatch. The API access key is missing from the environment.",
+  QUOTA: "API Throttled: Stark Core is cooling down.",
+  SAFETY: "Sir, I'm afraid that protocol is restricted by the Sakovia Accords.",
+  GENERIC: "Uncaught exception in Neural Engine. Rerouting through local backup.",
+  AUTH_FAILED: "Biometric Mismatch. Terminal Lock Engaged.",
+  PROJECTION_FAILED: "Spatial rendering unit unresponsive.",
+  MISSING_KEY: "Sir, the API_KEY environment variable is null. I cannot access the global neural net.",
 };

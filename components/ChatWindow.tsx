@@ -2,15 +2,21 @@
 import React, { useEffect, useRef } from 'react';
 import { Message, MessageRole, JarvisTheme } from '../types';
 
-// Added theme: JarvisTheme to the prop type to match App.tsx usage
-const ChatWindow: React.FC<{ messages: Message[], isProcessing: boolean, theme: JarvisTheme }> = ({ messages, isProcessing, theme }) => {
+interface ChatWindowProps {
+  messages: Message[];
+  isProcessing: boolean;
+  theme: JarvisTheme;
+  liveTranscript?: { user: string, jarvis: string };
+}
+
+const ChatWindow: React.FC<ChatWindowProps> = ({ messages, isProcessing, theme, liveTranscript }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, isProcessing]);
+  }, [messages, isProcessing, liveTranscript]);
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-8 pr-4 custom-scrollbar scroll-smooth">
@@ -42,6 +48,34 @@ const ChatWindow: React.FC<{ messages: Message[], isProcessing: boolean, theme: 
           </div>
         </div>
       ))}
+
+      {/* Real-time Voice Transcription Module */}
+      {(liveTranscript?.user || liveTranscript?.jarvis) && (
+        <div className="space-y-4 animate-in fade-in duration-300">
+          {liveTranscript.user && (
+            <div className="flex flex-col items-end">
+              <div className="flex items-center gap-2 mb-1 px-2">
+                <span className="mono text-[9px] font-bold uppercase tracking-widest text-cyan-500">VOICE_INPUT</span>
+              </div>
+              <div className="max-w-[80%] px-6 py-4 rounded-xl border bg-cyan-500/10 border-cyan-500/40 text-cyan-100 rounded-tr-none italic opacity-70">
+                {liveTranscript.user}
+              </div>
+            </div>
+          )}
+          {liveTranscript.jarvis && (
+            <div className="flex flex-col items-start">
+              <div className="flex items-center gap-2 mb-1 px-2">
+                <span className="mono text-[9px] font-bold uppercase tracking-widest text-violet-400">NEURAL_STREAM</span>
+              </div>
+              <div className="max-w-[80%] px-6 py-4 rounded-xl border glass border-cyan-400/30 text-cyan-50 rounded-tl-none glow-cyan italic">
+                {liveTranscript.jarvis}
+                <span className="animate-pulse ml-1 inline-block w-1.5 h-4 bg-cyan-400 align-middle" />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {isProcessing && (
         <div className="flex items-center gap-4 animate-pulse px-2">
           <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" />

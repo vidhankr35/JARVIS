@@ -7,6 +7,7 @@ interface ControlPanelProps {
   isProcessing: boolean;
   isVoiceEnabled: boolean;
   isListening: boolean;
+  isSpeaking: boolean;
   theme: JarvisTheme;
   onVoiceToggle: () => void;
   onModeChange: (mode: 'standard' | 'scientific' | 'engineering') => void;
@@ -18,6 +19,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
   isProcessing, 
   isVoiceEnabled,
   isListening,
+  isSpeaking,
   onVoiceToggle,
   onModeChange,
   onManualHologram
@@ -46,6 +48,23 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
 
   return (
     <div className="glass border-t border-cyan-500/20 p-4 lg:p-6 z-30 flex flex-col gap-4">
+      {/* Holographic Visualizer */}
+      {isVoiceEnabled && (
+        <div className="h-8 flex items-center justify-center gap-1">
+          {[...Array(16)].map((_, i) => (
+            <div 
+              key={i} 
+              className={`w-1 bg-cyan-400 transition-all duration-150 ${isListening || isSpeaking ? 'animate-[pulse_1s_infinite]' : 'h-1'}`}
+              style={{ 
+                height: isListening || isSpeaking ? `${30 + Math.random() * 70}%` : '4px',
+                opacity: 0.3 + (i / 16),
+                animationDelay: `${i * 0.05}s`
+              }} 
+            />
+          ))}
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex bg-black/40 border border-cyan-500/20 rounded p-1">
           {(['standard', 'scientific', 'engineering'] as const).map((m) => (
@@ -58,10 +77,10 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
         <div className="flex items-center gap-2">
           <button 
             onClick={onVoiceToggle} 
-            className={`px-4 py-2 text-[10px] mono rounded-full border transition-all flex items-center gap-2 ${isVoiceEnabled ? 'bg-cyan-500/20 border-cyan-400 text-cyan-400 shadow-lg' : 'border-slate-700 text-slate-500'}`}
+            className={`px-4 py-2 text-[10px] mono rounded-full border transition-all flex items-center gap-2 ${isVoiceEnabled ? 'bg-cyan-500/20 border-cyan-400 text-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.3)]' : 'border-slate-700 text-slate-500'}`}
           >
-            <div className={`w-1.5 h-1.5 rounded-full ${isVoiceEnabled ? 'bg-cyan-400 animate-pulse' : 'bg-slate-700'}`} />
-            {isVoiceEnabled ? 'VOICE_LIVE' : 'VOICE_LINK'}
+            <div className={`w-1.5 h-1.5 rounded-full ${isVoiceEnabled ? 'bg-cyan-400 animate-ping' : 'bg-slate-700'}`} />
+            {isVoiceEnabled ? 'NEURAL_LINK_ACTIVE' : 'ENGAGE_VOICE_LINK'}
           </button>
           
           <button 
@@ -89,7 +108,7 @@ const ControlPanel: React.FC<ControlPanelProps> = ({
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={isListening ? "Listening for command..." : "Awaiting directive, Sir..."}
+            placeholder={isListening ? "Uplink ready. Speak now, Sir..." : "Awaiting directive, Sir..."}
             className="w-full relative bg-black/40 border border-cyan-500/20 rounded-xl px-6 py-4 text-cyan-100 placeholder:text-cyan-900/40 focus:outline-none focus:border-cyan-400 transition-all mono text-sm"
           />
           {imagePreview && (
