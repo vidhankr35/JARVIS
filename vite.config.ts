@@ -5,7 +5,7 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   define: {
-    // Hardens the injection of the API_KEY for build stability
+    // Ensures process.env.API_KEY is available in the browser context via Vite's injection
     'process.env.API_KEY': JSON.stringify(process.env.API_KEY || ''),
   },
   server: {
@@ -15,8 +15,8 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
-    // Fixes the "chunk size limit" warning on Vercel
-    chunkSizeWarningLimit: 2000,
+    // Fixes Vercel's "chunk size limit" warning
+    chunkSizeWarningLimit: 3000,
     rollupOptions: {
       output: {
         manualChunks: {

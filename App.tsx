@@ -40,13 +40,27 @@ function decode(base64: string): Uint8Array {
   return bytes;
 }
 
+/**
+ * FIXED: decodeAudioData now handles alignment issues that cause "failure in code" (RangeError).
+ * It ensures the input buffer is properly aligned for Int16Array construction.
+ */
 async function decodeAudioData(
   data: Uint8Array,
   ctx: AudioContext,
   sampleRate: number,
   numChannels: number,
 ): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer, data.byteOffset, data.byteLength / 2);
+  // Ensure the buffer is aligned to 2 bytes for Int16Array
+  let dataInt16: Int16Array;
+  if (data.byteOffset % 2 === 0) {
+    dataInt16 = new Int16Array(data.buffer, data.byteOffset, data.byteLength / 2);
+  } else {
+    // If not aligned, create a copy which will be correctly aligned
+    const alignedCopy = new Uint8Array(data.length);
+    alignedCopy.set(data);
+    dataInt16 = new Int16Array(alignedCopy.buffer, 0, alignedCopy.length / 2);
+  }
+
   const frameCount = dataInt16.length / numChannels;
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
   
@@ -240,7 +254,7 @@ const App: React.FC = () => {
 
   const toggleVoice = async () => {
     if (state.isVoiceEnabled) {
-      sessionRef.current?.close();
+      if (sessionRef.current) sessionRef.current.close();
       setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false, isSpeaking: false }));
       return;
     }
@@ -261,8 +275,9 @@ const App: React.FC = () => {
         callbacks: {
           onopen: () => {
             setState(prev => ({ ...prev, isListening: true, isProcessing: false }));
-            const source = inAudioCtxRef.current!.createMediaStreamSource(stream);
-            const scriptProcessor = inAudioCtxRef.current!.createScriptProcessor(4096, 1, 1);
+            if (!inAudioCtxRef.current) return;
+            const source = inAudioCtxRef.current.createMediaStreamSource(stream);
+            const scriptProcessor = inAudioCtxRef.current.createScriptProcessor(4096, 1, 1);
             scriptProcessor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
               const int16 = new Int16Array(inputData.length);
@@ -270,26 +285,38 @@ const App: React.FC = () => {
               sessionPromise.then(s => s.sendRealtimeInput({ media: { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' } }));
             };
             source.connect(scriptProcessor);
-            scriptProcessor.connect(inAudioCtxRef.current!.destination);
-            sessionRef.current = { close: () => { scriptProcessor.disconnect(); source.disconnect(); stream.getTracks().forEach(t => t.stop()); } };
+            scriptProcessor.connect(inAudioCtxRef.current.destination);
+            sessionRef.current = { close: () => { 
+              scriptProcessor.disconnect(); 
+              source.disconnect(); 
+              stream.getTracks().forEach(t => t.stop()); 
+              addLog("VOICE_LINK: SEVERED");
+            }};
             addLog("VOICE_UPLINK: ONLINE");
           },
           onmessage: async (msg: LiveServerMessage) => {
             if (msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data) {
               if (outAudioCtxRef.current?.state === 'suspended') await outAudioCtxRef.current.resume();
               setState(prev => ({ ...prev, isSpeaking: true }));
-              nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outAudioCtxRef.current!.currentTime);
-              const buffer = await decodeAudioData(decode(msg.serverContent.modelTurn.parts[0].inlineData.data), outAudioCtxRef.current!, 24000, 1);
-              const source = outAudioCtxRef.current!.createBufferSource();
-              source.buffer = buffer;
-              source.connect(outAudioCtxRef.current!.destination);
-              source.onended = () => {
-                audioSourcesRef.current.delete(source);
-                if (audioSourcesRef.current.size === 0) setState(prev => ({ ...prev, isSpeaking: false }));
-              };
-              source.start(nextStartTimeRef.current);
-              nextStartTimeRef.current += buffer.duration;
-              audioSourcesRef.current.add(source);
+              
+              if (!outAudioCtxRef.current) return;
+              nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outAudioCtxRef.current.currentTime);
+              
+              try {
+                const buffer = await decodeAudioData(decode(msg.serverContent.modelTurn.parts[0].inlineData.data), outAudioCtxRef.current, 24000, 1);
+                const source = outAudioCtxRef.current.createBufferSource();
+                source.buffer = buffer;
+                source.connect(outAudioCtxRef.current.destination);
+                source.onended = () => {
+                  audioSourcesRef.current.delete(source);
+                  if (audioSourcesRef.current.size === 0) setState(prev => ({ ...prev, isSpeaking: false }));
+                };
+                source.start(nextStartTimeRef.current);
+                nextStartTimeRef.current += buffer.duration;
+                audioSourcesRef.current.add(source);
+              } catch (err) {
+                console.error("Audio Decode/Play Fail:", err);
+              }
             }
             if (msg.serverContent?.interrupted) {
               audioSourcesRef.current.forEach(s => { try { s.stop(); } catch {} });
@@ -311,7 +338,7 @@ const App: React.FC = () => {
             }
           },
           onerror: (e) => {
-            addLog(`UPLINK_ERR: ${e.toString()}`);
+            addLog(`UPLINK_ERR: Signal integrity lost.`);
             setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false, isSpeaking: false }));
           }
         },
