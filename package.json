@@ -1,4 +1,3 @@
-
 {
   "name": "jarvis-core",
   "private": true,
@@ -6,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "export UV_LINK_MODE=copy && tsc && vite build",
     "preview": "vite preview",
     "start": "vite"
   },

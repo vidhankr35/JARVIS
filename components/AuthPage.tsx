@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { User, SubscriptionLevel } from '../types';
 import { PRIME_USERS, THEMES } from '../constants';
@@ -79,7 +78,6 @@ const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
     setIsScanning(true);
     setError(null);
     setTimeout(() => {
-      // Simulate a guest login or prompt for fake "real" user
       const user: User = {
         username: `GUEST_${Math.floor(Math.random() * 9000) + 1000}`,
         email: `external_${type.toLowerCase()}@uplink.net`,
@@ -94,14 +92,12 @@ const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
 
   return (
     <div className="fixed inset-0 z-[100] bg-[#010409] flex items-center justify-center p-4 lg:p-6 font-mono overflow-hidden">
-      {/* Background Tech Effects */}
       <div className="absolute inset-0 opacity-20 pointer-events-none">
         <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_50%_50%,_rgba(34,211,238,0.1)_0%,_transparent_70%)]" />
         <div className="absolute top-0 left-0 w-full h-1 bg-cyan-500/20 animate-[scanline_4s_linear_infinite]" />
       </div>
       
       <div className="glass p-8 lg:p-12 rounded-[2rem] w-full max-w-lg border border-cyan-500/20 relative shadow-[0_0_100px_rgba(34,211,238,0.05)] overflow-hidden">
-        {/* Progress Bar Top */}
         <div className="absolute top-0 left-0 h-1 bg-cyan-500 transition-all duration-300" style={{ width: `${scanProgress}%` }} />
         
         <div className="text-center mb-8">
@@ -121,7 +117,6 @@ const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
 
         {!isScanning ? (
           <div className="space-y-6">
-            {/* Method Tabs */}
             <div className="flex bg-black/40 p-1 rounded-xl border border-white/5">
               {(['biometric', 'google', 'phone'] as AuthMethod[]).map(m => (
                 <button 
@@ -204,7 +199,6 @@ const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
               </div>
             )}
 
-            {/* Admin Override */}
             <div className="pt-4 border-t border-white/5">
                <button 
                 onClick={() => handleLogin('TONY STARK', '', true)}
@@ -215,7 +209,6 @@ const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
               </button>
             </div>
 
-            {/* Hint Section */}
             <div className="grid grid-cols-3 gap-2">
               {Object.values(PRIME_USERS).map(p => (
                 <div key={p.id} className="p-2 border border-white/5 bg-black/20 rounded-lg text-center cursor-help group relative" title={`Access Code: ${p.accessCode}`}>
@@ -248,10 +241,10 @@ const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
             </div>
             <div className="bg-black/40 p-4 rounded-xl border border-cyan-500/10 max-w-xs mx-auto">
                <p className="text-[8px] text-cyan-400/40 text-left mono leading-relaxed">
-                 {'>'} STARK_CLOUD_SYNC: IN_PROGRESS<br/>
-                 {'>'} BIOMETRICS: ANALYZING_REINA<br/>
-                 {'>'} COGNITIVE_SCAN: STABLE<br/>
-                 {'>'} TERMINAL: {Math.random().toString(16).substring(2, 10).toUpperCase()}
+                 &gt; STARK_CLOUD_SYNC: IN_PROGRESS<br/>
+                 &gt; BIOMETRICS: ANALYZING_REINA<br/>
+                 &gt; COGNITIVE_SCAN: STABLE<br/>
+                 &gt; TERMINAL: {Math.random().toString(16).substring(2, 10).toUpperCase()}
                </p>
             </div>
           </div>
