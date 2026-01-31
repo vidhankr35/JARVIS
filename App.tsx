@@ -1,6 +1,6 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from '@google/genai';
+import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration, GenerateContentResponse, Chat } from '@google/genai';
 import { Message, MessageRole, JarvisState, GroundingLink, User, SubscriptionLevel, JarvisTheme } from './types';
 import { JARVIS_SYSTEM_INSTRUCTION, INITIAL_GREETING, ERROR_MESSAGES, THEMES, PRIME_USERS } from './constants';
 import Header from './components/Header';
@@ -67,13 +67,15 @@ const App: React.FC = () => {
   const [showApiConsole, setShowApiConsole] = useState(false);
   const [lastPayload, setLastPayload] = useState<any>(null);
   const [liveTranscript, setLiveTranscript] = useState({ user: '', jarvis: '' });
+  const [streamingText, setStreamingText] = useState<string>('');
 
   const [state, setState] = useState<JarvisState & { 
     apiLogs: string[], 
     hologram: { subject: string, imageUrl: string | null } | null,
     temperature: number,
     thinkingBudget: number,
-    isApiValid: boolean | null
+    isApiValid: boolean | null,
+    streamStatus: string | null
   }>({
     isProcessing: false,
     isListening: false,
@@ -83,11 +85,13 @@ const App: React.FC = () => {
     memory: ["Neural link calibrated.", "Stark Gateway Online."],
     apiLogs: ["CORE_READY", "API_V1_INIT"],
     hologram: null,
-    temperature: 0.8,
-    thinkingBudget: 12000,
-    isApiValid: null
+    temperature: 0.7,
+    thinkingBudget: 0,
+    isApiValid: null,
+    streamStatus: null
   });
 
+  const chatSessionRef = useRef<Chat | null>(null);
   const sessionRef = useRef<any>(null);
   const outAudioCtxRef = useRef<AudioContext | null>(null);
   const inAudioCtxRef = useRef<AudioContext | null>(null);
@@ -112,6 +116,21 @@ const App: React.FC = () => {
     validateApiKey();
   }, [validateApiKey]);
 
+  // Initialize Chat Session
+  const initChatSession = useCallback(() => {
+    if (!validateApiKey()) return;
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+    chatSessionRef.current = ai.chats.create({
+      model: 'gemini-3-flash-preview',
+      config: {
+        systemInstruction: JARVIS_SYSTEM_INSTRUCTION,
+        tools: [{ functionDeclarations: [HOLOGRAM_TOOL] }],
+        temperature: state.temperature
+      }
+    });
+    addLog("NEURAL_SESSION: CREATED");
+  }, [validateApiKey, state.temperature, addLog]);
+
   const handleLogin = useCallback((user: User) => {
     setCurrentUser(user);
     if (user.preferredTheme) setActiveTheme(user.preferredTheme);
@@ -128,12 +147,14 @@ const App: React.FC = () => {
       timestamp: Date.now()
     }]);
     
+    initChatSession();
     addLog(`AUTH_SUCCESS: ${user.username}`);
-  }, [addLog]);
+  }, [addLog, initChatSession]);
 
   const handleLogout = useCallback(() => {
     if (sessionRef.current) sessionRef.current.close();
     if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
+    chatSessionRef.current = null;
     setCurrentUser(null);
     setMessages([]);
     setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false, isSpeaking: false, hologram: null }));
@@ -255,54 +276,71 @@ const App: React.FC = () => {
 
   const handleSendMessage = async (text: string, imageData?: string) => {
     if (!text.trim() && !imageData) return;
-    if (!validateApiKey()) {
-      setMessages(prev => [...prev, { id: `err-${Date.now()}`, role: MessageRole.JARVIS, text: ERROR_MESSAGES.MISSING_KEY, timestamp: Date.now(), isError: true }]);
-      return;
+    
+    if (!chatSessionRef.current) {
+      initChatSession();
+      if (!chatSessionRef.current) return;
     }
 
     const userMsg: Message = { id: `u-${Date.now()}`, role: MessageRole.USER, text, timestamp: Date.now(), image: imageData };
     setMessages(prev => [...prev, userMsg]);
-    setState(prev => ({ ...prev, isProcessing: true }));
-    addLog(`POST: /v1/chat`);
+    setState(prev => ({ ...prev, isProcessing: true, streamStatus: 'OPTIMIZING_COGNITION' }));
+    setStreamingText('');
+    
+    const startTime = Date.now();
+    addLog(`UPLINK_SENT: ${text.substring(0, 15)}...`);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview', // Switched to Flash for speed/free-tier reliability
-        contents: text,
-        config: {
-          systemInstruction: JARVIS_SYSTEM_INSTRUCTION,
-          tools: [{ functionDeclarations: [HOLOGRAM_TOOL] }],
-          temperature: state.temperature
-        }
-      });
+      const messageInput = imageData ? {
+        parts: [
+          { inlineData: { data: imageData.split(',')[1], mimeType: 'image/jpeg' } },
+          { text }
+        ]
+      } : text;
 
-      let textOutput = response.text || "";
-      if (response.functionCalls) {
-        for (const fc of response.functionCalls) {
-          if (fc.name === 'generate_hologram') {
-            generateHologram(fc.args.subject as string);
-            if (!textOutput) textOutput = `Certainly, Sir. Initializing holographic projection of the ${fc.args.subject} now.`;
+      const stream = await chatSessionRef.current.sendMessageStream({ message: messageInput });
+
+      let fullText = '';
+      setState(prev => ({ ...prev, streamStatus: 'RECONSTRUCTING_DATA' }));
+
+      for await (const chunk of stream) {
+        const chunkText = chunk.text;
+        if (chunkText) {
+          fullText += chunkText;
+          setStreamingText(fullText);
+        }
+
+        // Handle function calls during stream
+        if (chunk.candidates?.[0]?.content?.parts) {
+          for (const part of chunk.candidates[0].content.parts) {
+            if (part.functionCall && part.functionCall.name === 'generate_hologram') {
+              const args = part.functionCall.args as { subject: string };
+              generateHologram(args.subject);
+            }
           }
         }
       }
 
+      const latency = Date.now() - startTime;
+      addLog(`RESPONSE_RECEIVED: ${latency}ms`);
+
       setMessages(prev => [...prev, {
         id: `j-${Date.now()}`,
         role: MessageRole.JARVIS,
-        text: textOutput || "Neural processing complete, Sir.",
-        timestamp: Date.now(),
-        groundingLinks: response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((c: any) => ({
-          title: c.web?.title || 'Telemetry Source',
-          uri: c.web?.uri
-        }))
+        text: fullText || "Neural processing complete, Sir.",
+        timestamp: Date.now()
       }]);
+      setStreamingText('');
+      setState(prev => ({ ...prev, streamStatus: 'SYNC_COMPLETE' }));
+
     } catch (e: any) {
-      addLog(`RESPONSE: 500 ERR`);
-      const errorMsg = e.message?.includes('quota') ? ERROR_MESSAGES.QUOTA : ERROR_MESSAGES.GENERIC;
+      addLog(`CORE_FAULT: ${e.message}`);
+      const errorMsg = e.message?.includes('quota') ? ERROR_MESSAGES.QUOTA : `Uplink Severed: ${e.message}`;
       setMessages(prev => [...prev, { id: `err-${Date.now()}`, role: MessageRole.JARVIS, text: errorMsg, timestamp: Date.now(), isError: true }]);
+      // If critical fault, re-init session
+      if (e.message?.includes('invalid') || e.message?.includes('expired')) initChatSession();
     } finally {
-      setState(prev => ({ ...prev, isProcessing: false }));
+      setState(prev => ({ ...prev, isProcessing: false, streamStatus: null }));
     }
   };
 
@@ -326,7 +364,7 @@ const App: React.FC = () => {
 
           <div className="flex-1 z-10 p-6 flex gap-6 overflow-hidden">
             <div className={`flex-1 flex flex-col transition-all duration-500 ${showApiConsole ? 'w-1/2' : 'w-full'}`}>
-              <ChatWindow messages={messages} isProcessing={state.isProcessing} theme={activeTheme} liveTranscript={liveTranscript} />
+              <ChatWindow messages={messages} isProcessing={state.isProcessing} theme={activeTheme} liveTranscript={liveTranscript} streamingText={streamingText} streamStatus={state.streamStatus} />
             </div>
 
             {showApiConsole && (

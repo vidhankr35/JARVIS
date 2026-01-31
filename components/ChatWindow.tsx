@@ -7,16 +7,18 @@ interface ChatWindowProps {
   isProcessing: boolean;
   theme: JarvisTheme;
   liveTranscript?: { user: string, jarvis: string };
+  streamingText?: string;
+  streamStatus?: string | null;
 }
 
-const ChatWindow: React.FC<ChatWindowProps> = ({ messages, isProcessing, theme, liveTranscript }) => {
+const ChatWindow: React.FC<ChatWindowProps> = ({ messages, isProcessing, theme, liveTranscript, streamingText, streamStatus }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, isProcessing, liveTranscript]);
+  }, [messages, isProcessing, liveTranscript, streamingText]);
 
   return (
     <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-8 pr-4 custom-scrollbar scroll-smooth">
@@ -30,9 +32,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ messages, isProcessing, theme, 
           </div>
 
           <div className={`max-w-[80%] px-6 py-4 rounded-xl border ${
-            msg.role === MessageRole.USER 
-              ? 'bg-cyan-500/5 border-cyan-500/20 text-cyan-50 rounded-tr-none' 
-              : 'glass border-white/5 text-slate-200 rounded-tl-none glow-cyan shadow-xl'
+            msg.isError 
+              ? 'bg-red-500/5 border-red-500/20 text-red-200'
+              : msg.role === MessageRole.USER 
+                ? 'bg-cyan-500/5 border-cyan-500/20 text-cyan-50 rounded-tr-none' 
+                : 'glass border-white/5 text-slate-200 rounded-tl-none glow-cyan shadow-xl'
           }`}>
             <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
             
@@ -48,6 +52,23 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ messages, isProcessing, theme, 
           </div>
         </div>
       ))}
+
+      {/* Real-time Streaming Response */}
+      {streamingText && (
+        <div className="flex flex-col items-start animate-in fade-in duration-300">
+          <div className="flex items-center gap-2 mb-1 px-2">
+            <span className="mono text-[9px] font-bold uppercase tracking-widest text-violet-400">JARVIS_STREAMING</span>
+            <span className="mono text-[8px] text-cyan-400 animate-pulse">{streamStatus}</span>
+          </div>
+          <div className="max-w-[80%] px-6 py-4 rounded-xl border glass border-cyan-400/20 text-slate-200 rounded-tl-none glow-cyan shadow-xl relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-b from-transparent via-cyan-500/5 to-transparent animate-[scanline_3s_linear_infinite] pointer-events-none opacity-20" />
+            <p className="whitespace-pre-wrap leading-relaxed">
+              {streamingText}
+              <span className="animate-pulse ml-1 inline-block w-2 h-4 bg-cyan-400 align-middle" />
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Real-time Voice Transcription Module */}
       {(liveTranscript?.user || liveTranscript?.jarvis) && (
@@ -76,10 +97,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ messages, isProcessing, theme, 
         </div>
       )}
 
-      {isProcessing && (
+      {isProcessing && !streamingText && (
         <div className="flex items-center gap-4 animate-pulse px-2">
           <div className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-bounce" />
-          <span className="mono text-[10px] text-cyan-400 uppercase">Analyzing Tensors...</span>
+          <span className="mono text-[10px] text-cyan-400 uppercase tracking-widest">{streamStatus || 'Initializing Tensors...'}</span>
         </div>
       )}
     </div>
