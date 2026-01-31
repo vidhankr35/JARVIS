@@ -241,10 +241,10 @@ const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
             </div>
             <div className="bg-black/40 p-4 rounded-xl border border-cyan-500/10 max-w-xs mx-auto">
                <p className="text-[8px] text-cyan-400/40 text-left mono leading-relaxed">
-                 &gt; STARK_CLOUD_SYNC: IN_PROGRESS<br/>
-                 &gt; BIOMETRICS: ANALYZING_REINA<br/>
-                 &gt; COGNITIVE_SCAN: STABLE<br/>
-                 &gt; TERMINAL: {Math.random().toString(16).substring(2, 10).toUpperCase()}
+                 {">"} STARK_CLOUD_SYNC: IN_PROGRESS<br/>
+                 {">"} BIOMETRICS: ANALYZING_REINA<br/>
+                 {">"} COGNITIVE_SCAN: STABLE<br/>
+                 {">"} TERMINAL: {Math.random().toString(16).substring(2, 10).toUpperCase()}
                </p>
             </div>
           </div>
