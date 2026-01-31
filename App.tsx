@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration, GenerateContentResponse, Chat } from '@google/genai';
-import { Message, MessageRole, JarvisState, User, SubscriptionLevel, JarvisTheme, GroundingLink } from './types';
+import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration, GenerateContentResponse } from '@google/genai';
+import { Message, MessageRole, JarvisState, User, JarvisTheme, GroundingLink } from './types';
 import { JARVIS_SYSTEM_INSTRUCTION, INITIAL_GREETING, ERROR_MESSAGES, THEMES, PRIME_USERS } from './constants';
 import Header from './components/Header';
 import ChatWindow from './components/ChatWindow';
@@ -12,7 +12,13 @@ import HologramStage from './components/HologramStage';
 import AuthPage from './components/AuthPage';
 import ApiConsole from './components/ApiConsole';
 
-// Helper functions for Live API
+// Global declaration for Vercel/TSC build to recognize Vite-defined process.env
+declare var process: {
+  env: {
+    API_KEY: string;
+  };
+};
+
 function encode(bytes: Uint8Array) {
   let binary = '';
   const len = bytes.byteLength;
@@ -38,7 +44,6 @@ async function decodeAudioData(
   sampleRate: number,
   numChannels: number,
 ): Promise<AudioBuffer> {
-  // CRITICAL FIX: Ensure the buffer is correctly aligned for Int16Array
   const dataInt16 = new Int16Array(data.buffer, data.byteOffset, data.byteLength / 2);
   const frameCount = dataInt16.length / numChannels;
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
@@ -67,7 +72,6 @@ const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [activeTheme, setActiveTheme] = useState<JarvisTheme>('MK_85');
   const [showApiConsole, setShowApiConsole] = useState(false);
-  const [lastPayload, setLastPayload] = useState<any>(null);
   const [liveTranscript, setLiveTranscript] = useState({ user: '', jarvis: '' });
   const [streamingText, setStreamingText] = useState<string>('');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -77,7 +81,6 @@ const App: React.FC = () => {
     apiLogs: string[], 
     hologram: { subject: string, imageUrl: string | null } | null,
     temperature: number,
-    thinkingBudget: number,
     isApiValid: boolean | null,
     streamStatus: string | null
   }>({
@@ -93,12 +96,11 @@ const App: React.FC = () => {
     apiLogs: ["CORE_READY", "API_V1_INIT"],
     hologram: null,
     temperature: 0.7,
-    thinkingBudget: 0,
     isApiValid: null,
     streamStatus: null
   });
 
-  const chatSessionRef = useRef<Chat | null>(null);
+  const chatSessionRef = useRef<any>(null);
   const sessionRef = useRef<any>(null);
   const outAudioCtxRef = useRef<AudioContext | null>(null);
   const inAudioCtxRef = useRef<AudioContext | null>(null);
@@ -114,211 +116,121 @@ const App: React.FC = () => {
     const key = process.env.API_KEY;
     const isValid = !!key && key !== 'undefined' && key !== '' && key !== 'your_gemini_api_key_here';
     setState(prev => ({ ...prev, isApiValid: isValid }));
-    if (!isValid) addLog("GATEWAY_ERR: INVALID_KEY_DETECTED");
     return isValid;
-  }, [addLog]);
+  }, []);
 
   useEffect(() => {
     validateApiKey();
     const handleResize = () => {
       setIsMobile(window.innerWidth < 768);
-      if (window.visualViewport) {
-        document.body.style.height = window.visualViewport.height + 'px';
-      }
     };
     window.addEventListener('resize', handleResize);
-    window.visualViewport?.addEventListener('resize', handleResize);
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      window.visualViewport?.removeEventListener('resize', handleResize);
-    };
+    return () => window.removeEventListener('resize', handleResize);
   }, [validateApiKey]);
 
   const initChatSession = useCallback(() => {
     if (!validateApiKey()) return;
     
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const modelName = state.isThinkingMode ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
       
-      let modelName = 'gemini-3-flash-preview';
-      let tools: any[] = [{ functionDeclarations: [HOLOGRAM_TOOL] }];
-      let thinkingConfig = undefined;
-
-      if (state.isThinkingMode) {
-        modelName = 'gemini-3-pro-preview';
-        thinkingConfig = { thinkingBudget: 32768 };
-      } else if (state.isSearchEnabled) {
-        modelName = 'gemini-3-flash-preview';
-        tools = [{ googleSearch: {} }]; 
-      }
-
       const config: any = {
-        systemInstruction: JARVIS_SYSTEM_INSTRUCTION + (isMobile ? "\n\nCRITICAL: User is on mobile. Be extremely concise." : ""),
-        tools: tools,
+        systemInstruction: JARVIS_SYSTEM_INSTRUCTION,
+        tools: state.isSearchEnabled ? [{ googleSearch: {} }] : [{ functionDeclarations: [HOLOGRAM_TOOL] }],
         temperature: state.temperature,
-        thinkingConfig: thinkingConfig
+        thinkingConfig: state.isThinkingMode ? { thinkingBudget: 32768 } : undefined
       };
 
-      chatSessionRef.current = ai.chats.create({
-        model: modelName,
-        config: config
-      });
-      addLog(`PROTOCOL_SYNC: ${modelName.toUpperCase()} [THINK=${state.isThinkingMode ? 'ON' : 'OFF'}] [SEARCH=${state.isSearchEnabled ? 'ON' : 'OFF'}]`);
+      chatSessionRef.current = ai.chats.create({ model: modelName, config });
+      addLog(`NEURAL_INIT: ${modelName.toUpperCase()} SUCCESS`);
     } catch (error: any) {
-      addLog(`SYNAPSE_FAULT: ${error.message}`);
+      addLog(`CORE_ERR: ${error.message}`);
     }
-  }, [validateApiKey, state.temperature, state.isThinkingMode, state.isSearchEnabled, addLog, isMobile]);
+  }, [validateApiKey, state.temperature, state.isThinkingMode, state.isSearchEnabled, addLog]);
 
   useEffect(() => {
-    if (currentUser) {
-      addLog("RECONFIGURING_NEURAL_PATHWAYS...");
-      initChatSession();
-    }
-  }, [state.isThinkingMode, state.isSearchEnabled, currentUser]);
+    if (currentUser) initChatSession();
+  }, [state.isThinkingMode, state.isSearchEnabled, currentUser, initChatSession]);
 
-  const handleLogin = useCallback((user: User) => {
+  const handleLogin = (user: User) => {
     setCurrentUser(user);
     if (user.preferredTheme) setActiveTheme(user.preferredTheme);
-    
     const profile = Object.values(PRIME_USERS).find(p => p.name.toUpperCase() === user.username.toUpperCase());
-    const greetingText = profile 
-      ? INITIAL_GREETING(profile.name, profile.specialization) 
-      : INITIAL_GREETING(user.username, "General Systems Management");
+    const greeting = profile ? INITIAL_GREETING(profile.name, profile.specialization) : INITIAL_GREETING(user.username, "General Intelligence");
+    setMessages([{ id: `init-${Date.now()}`, role: MessageRole.JARVIS, text: greeting, timestamp: Date.now() }]);
+    addLog(`LOGIN_AUTH: ${user.username}`);
+  };
 
-    setMessages([{
-      id: `init-${Date.now()}`,
-      role: MessageRole.JARVIS,
-      text: greetingText,
-      timestamp: Date.now()
-    }]);
-    
-    initChatSession();
-    addLog(`AUTH_SUCCESS: ${user.username}`);
-  }, [addLog, initChatSession]);
-
-  const handleLogout = useCallback(() => {
+  const handleLogout = () => {
     if (sessionRef.current) sessionRef.current.close();
     chatSessionRef.current = null;
     setCurrentUser(null);
     setMessages([]);
-    setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false, isSpeaking: false, hologram: null, isSimulationActive: false }));
-    addLog("SESSION_TERMINATED");
-  }, [addLog]);
+    setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false, isSpeaking: false, hologram: null }));
+    addLog("SESSION_RESET");
+  };
 
   const generateHologramImage = async (subject: string) => {
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
-        contents: [{ 
-          parts: [{ text: `A highly detailed blue holographic 3D schematic/blueprint of ${subject} against a solid black background, tech UI elements, cinematic sci-fi lighting, Stark Industries style.` }] 
-        }],
-        config: {
-          imageConfig: {
-            aspectRatio: "1:1"
-          }
-        }
+        contents: [{ parts: [{ text: `A blue holographic 3D schematic of ${subject}, stark industries style, on black background.` }] }],
+        config: { imageConfig: { aspectRatio: "1:1" } }
       });
 
       for (const part of response.candidates[0].content.parts) {
         if (part.inlineData) {
           const imageUrl = `data:image/png;base64,${part.inlineData.data}`;
           setState(prev => ({ ...prev, hologram: { subject, imageUrl } }));
-          addLog(`HOLOGRAM_LINKED: ${subject.toUpperCase()}`);
           break;
         }
       }
-    } catch (error: any) {
-      addLog(`PROJECTION_ERR: ${error.message}`);
-    }
+    } catch (e: any) { addLog(`OPTIC_FAIL: ${e.message}`); }
   };
 
   const handleSend = async (text: string, imageData?: string) => {
     if (!chatSessionRef.current) initChatSession();
     if (!chatSessionRef.current) return;
 
-    const userMsg: Message = {
-      id: `u-${Date.now()}`,
-      role: MessageRole.USER,
-      text: text,
-      timestamp: Date.now(),
-      image: imageData
-    };
-
-    setMessages(prev => [...prev, userMsg]);
-    setState(prev => ({ ...prev, isProcessing: true, streamStatus: 'Analyzing Query...' }));
+    setMessages(prev => [...prev, { id: `u-${Date.now()}`, role: MessageRole.USER, text, timestamp: Date.now(), image: imageData }]);
+    setState(prev => ({ ...prev, isProcessing: true, streamStatus: 'Analysing...' }));
     setStreamingText('');
 
     try {
-      addLog(`UPLINK_SENT: ${text.substring(0, 30)}...`);
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-      
-      let streamResponse;
-      if (imageData) {
-        const imagePart = {
-          inlineData: {
-            mimeType: 'image/jpeg',
-            data: imageData.split(',')[1],
-          },
-        };
-        streamResponse = await chatSessionRef.current.sendMessageStream({
-          message: [imagePart, { text }]
-        });
-      } else {
-        streamResponse = await chatSessionRef.current.sendMessageStream({ message: text });
-      }
+      const parts = imageData ? [{ inlineData: { mimeType: 'image/jpeg', data: imageData.split(',')[1] } }, { text }] : [{ text }];
+      const streamResponse = await chatSessionRef.current.sendMessageStream({ message: parts });
 
       let fullText = '';
-      let groundingLinks: GroundingLink[] = [];
+      let links: GroundingLink[] = [];
 
       for await (const chunk of streamResponse) {
-        const c = chunk as GenerateContentResponse;
-        const textChunk = c.text || '';
+        const textChunk = chunk.text || '';
         fullText += textChunk;
         setStreamingText(fullText);
 
-        if (c.candidates?.[0]?.groundingMetadata?.groundingChunks) {
-          const chunks = c.candidates[0].groundingMetadata.groundingChunks;
-          chunks.forEach((chunk: any) => {
-            if (chunk.web) {
-              groundingLinks.push({ title: chunk.web.title || 'Source', uri: chunk.web.uri });
-            } else if (chunk.maps) {
-              groundingLinks.push({ title: chunk.maps.title || 'Location', uri: chunk.maps.uri });
-            }
+        const ground = chunk.candidates?.[0]?.groundingMetadata?.groundingChunks;
+        if (ground) {
+          ground.forEach((c: any) => {
+            if (c.web) links.push({ title: c.web.title || 'Source', uri: c.web.uri });
           });
         }
 
-        if (c.functionCalls) {
-          for (const fc of c.functionCalls) {
+        if (chunk.functionCalls) {
+          for (const fc of chunk.functionCalls) {
             if (fc.name === 'generate_hologram') {
-              const subject = fc.args.subject as string;
-              addLog(`TOOL_EXEC: HOLOGRAM_PROJECTION [${subject}]`);
-              generateHologramImage(subject);
+              addLog(`PROJECTION_INIT: ${fc.args.subject}`);
+              generateHologramImage(fc.args.subject as string);
             }
           }
         }
       }
 
-      const jarvisMsg: Message = {
-        id: `j-${Date.now()}`,
-        role: MessageRole.JARVIS,
-        text: fullText,
-        timestamp: Date.now(),
-        groundingLinks: groundingLinks.length > 0 ? groundingLinks : undefined
-      };
-
-      setMessages(prev => [...prev, jarvisMsg]);
+      setMessages(prev => [...prev, { id: `j-${Date.now()}`, role: MessageRole.JARVIS, text: fullText, timestamp: Date.now(), groundingLinks: links }]);
       setStreamingText('');
-      addLog("RESPONSE_FINALIZED");
     } catch (error: any) {
-      addLog(`CORE_FAULT: ${error.message}`);
-      setMessages(prev => [...prev, {
-        id: `err-${Date.now()}`,
-        role: MessageRole.JARVIS,
-        text: ERROR_MESSAGES.GENERIC,
-        timestamp: Date.now(),
-        isError: true
-      }]);
+      addLog(`LINK_ERR: ${error.message}`);
     } finally {
       setState(prev => ({ ...prev, isProcessing: false, streamStatus: null }));
     }
@@ -331,257 +243,106 @@ const App: React.FC = () => {
       return;
     }
 
-    if (!validateApiKey()) {
-      setMessages(prev => [...prev, { id: `err-voice-${Date.now()}`, role: MessageRole.JARVIS, text: ERROR_MESSAGES.MISSING_KEY, timestamp: Date.now(), isError: true }]);
-      return;
-    }
+    if (!validateApiKey()) return;
 
     try {
-      addLog("VOICE_LINK: INIT");
       setState(prev => ({ ...prev, isVoiceEnabled: true, isProcessing: true }));
-      
-      // Initialize Contexts with precise sample rates
       outAudioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       inAudioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      nextStartTimeRef.current = 0; 
+      nextStartTimeRef.current = 0;
 
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
           onopen: () => {
-            addLog("VOICE_LINK: ESTABLISHED");
             setState(prev => ({ ...prev, isListening: true, isProcessing: false }));
-            
             const source = inAudioCtxRef.current!.createMediaStreamSource(stream);
             const scriptProcessor = inAudioCtxRef.current!.createScriptProcessor(4096, 1, 1);
-            
             scriptProcessor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
-              const l = inputData.length;
-              const int16 = new Int16Array(l);
-              for (let i = 0; i < l; i++) int16[i] = inputData[i] * 32768;
-              const pcmBlob = {
-                data: encode(new Uint8Array(int16.buffer)),
-                mimeType: 'audio/pcm;rate=16000',
-              };
-              sessionPromise.then(session => {
-                session.sendRealtimeInput({ media: pcmBlob });
-              });
+              const int16 = new Int16Array(inputData.length);
+              for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
+              sessionPromise.then(s => s.sendRealtimeInput({ media: { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' } }));
             };
-            
             source.connect(scriptProcessor);
             scriptProcessor.connect(inAudioCtxRef.current!.destination);
-            
-            sessionRef.current = { close: () => { 
-                scriptProcessor.disconnect();
-                source.disconnect();
-                stream.getTracks().forEach(track => track.stop());
-                addLog("VOICE_NODE: DISCONNECTED");
-            }};
+            sessionRef.current = { close: () => { scriptProcessor.disconnect(); source.disconnect(); stream.getTracks().forEach(t => t.stop()); } };
           },
-          onmessage: async (message: LiveServerMessage) => {
-            if (message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data) {
-              const base64Audio = message.serverContent.modelTurn.parts[0].inlineData.data;
+          onmessage: async (msg: LiveServerMessage) => {
+            if (msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data) {
+              if (outAudioCtxRef.current?.state === 'suspended') await outAudioCtxRef.current.resume();
               setState(prev => ({ ...prev, isSpeaking: true }));
-              
-              // CRITICAL: Schedule the next chunk to start at exactly the end of the previous one
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outAudioCtxRef.current!.currentTime);
-              
-              const audioBuffer = await decodeAudioData(decode(base64Audio), outAudioCtxRef.current!, 24000, 1);
+              const buffer = await decodeAudioData(decode(msg.serverContent.modelTurn.parts[0].inlineData.data), outAudioCtxRef.current!, 24000, 1);
               const source = outAudioCtxRef.current!.createBufferSource();
-              source.buffer = audioBuffer;
+              source.buffer = buffer;
               source.connect(outAudioCtxRef.current!.destination);
-              
               source.onended = () => {
                 audioSourcesRef.current.delete(source);
-                if (audioSourcesRef.current.size === 0) {
-                  setState(prev => ({ ...prev, isSpeaking: false }));
-                }
+                if (audioSourcesRef.current.size === 0) setState(prev => ({ ...prev, isSpeaking: false }));
               };
-              
               source.start(nextStartTimeRef.current);
-              nextStartTimeRef.current += audioBuffer.duration;
+              nextStartTimeRef.current += buffer.duration;
               audioSourcesRef.current.add(source);
             }
-            
-            if (message.serverContent?.interrupted) {
-                // Stop all currently playing snippets immediately
-                audioSourcesRef.current.forEach(s => {
-                  try { s.stop(); } catch (e) {}
-                });
-                audioSourcesRef.current.clear();
-                nextStartTimeRef.current = outAudioCtxRef.current?.currentTime || 0;
-                setState(prev => ({ ...prev, isSpeaking: false }));
-                addLog("COMMS: INTERRUPTED");
+            if (msg.serverContent?.interrupted) {
+              audioSourcesRef.current.forEach(s => { try { s.stop(); } catch {} });
+              audioSourcesRef.current.clear();
+              nextStartTimeRef.current = outAudioCtxRef.current?.currentTime || 0;
+              setState(prev => ({ ...prev, isSpeaking: false }));
             }
-
-            if (message.serverContent?.inputTranscription) {
-                const text = message.serverContent.inputTranscription.text;
-                transcriptionRef.current.user += text;
-                setLiveTranscript(prev => ({ ...prev, user: transcriptionRef.current.user }));
+            if (msg.serverContent?.inputTranscription) {
+              transcriptionRef.current.user += msg.serverContent.inputTranscription.text;
+              setLiveTranscript(prev => ({ ...prev, user: transcriptionRef.current.user }));
             }
-            if (message.serverContent?.outputTranscription) {
-                const text = message.serverContent.outputTranscription.text;
-                transcriptionRef.current.jarvis += text;
-                setLiveTranscript(prev => ({ ...prev, jarvis: transcriptionRef.current.jarvis }));
+            if (msg.serverContent?.outputTranscription) {
+              transcriptionRef.current.jarvis += msg.serverContent.outputTranscription.text;
+              setLiveTranscript(prev => ({ ...prev, jarvis: transcriptionRef.current.jarvis }));
             }
-            if (message.serverContent?.turnComplete) {
-                transcriptionRef.current = { user: '', jarvis: '' };
-                setTimeout(() => setLiveTranscript({ user: '', jarvis: '' }), 3000);
+            if (msg.serverContent?.turnComplete) {
+              transcriptionRef.current = { user: '', jarvis: '' };
+              setTimeout(() => setLiveTranscript({ user: '', jarvis: '' }), 4000);
             }
-          },
-          onerror: (e: any) => {
-            addLog(`VOICE_ERR: ${e.message || 'Signal lost'}`);
-            setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false, isSpeaking: false }));
-          },
-          onclose: () => {
-            addLog("VOICE_LINK: TERMINATED");
-            setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false, isSpeaking: false }));
           }
         },
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } } },
           systemInstruction: JARVIS_SYSTEM_INSTRUCTION,
-          inputAudioTranscription: {},
-          outputAudioTranscription: {}
+          inputAudioTranscription: {}, outputAudioTranscription: {}
         }
       });
-    } catch (error: any) {
-      addLog(`COMMS_FAULT: ${error.message}`);
-      setState(prev => ({ ...prev, isVoiceEnabled: false, isProcessing: false }));
-    }
+    } catch (e: any) { setState(prev => ({ ...prev, isVoiceEnabled: false, isProcessing: false })); }
   };
 
   return (
-    <div className={`flex flex-col h-screen bg-[#010409] text-slate-200 overflow-hidden`}>
-      {!currentUser ? (
-        <AuthPage onLogin={handleLogin} />
-      ) : (
+    <div className="flex flex-col h-screen bg-[#010409] text-slate-200 overflow-hidden">
+      {!currentUser ? <AuthPage onLogin={handleLogin} /> : (
         <>
-          <Header 
-            user={currentUser} 
-            theme={activeTheme} 
-            onLogout={handleLogout} 
-            speaking={state.isSpeaking}
-            listening={state.isListening}
-            apiOk={state.isApiValid}
-            onToggleMenu={() => setIsSidebarOpen(!isSidebarOpen)}
-            isMobile={isMobile}
-          />
-          
+          <Header user={currentUser} theme={activeTheme} onLogout={handleLogout} speaking={state.isSpeaking} listening={state.isListening} apiOk={state.isApiValid} onToggleMenu={() => setIsSidebarOpen(!isSidebarOpen)} isMobile={isMobile} />
           <div className="flex flex-1 overflow-hidden relative">
-            {!isMobile && (
-              <Sidebar 
-                memory={state.memory} 
-                mode={state.currentMode} 
-                apiLogs={state.apiLogs}
-                theme={activeTheme}
-                onThemeChange={setActiveTheme}
-                isThinkingMode={state.isThinkingMode}
-                isSearchEnabled={state.isSearchEnabled}
-                onToggleThinking={() => setState(s => ({ ...s, isThinkingMode: !s.isThinkingMode, isSearchEnabled: false }))}
-                onToggleSearch={() => setState(s => ({ ...s, isSearchEnabled: !s.isSearchEnabled, isThinkingMode: false }))}
-                isSimulationActive={state.isSimulationActive}
-                onToggleSimulation={() => setState(s => ({ ...s, isSimulationActive: !s.isSimulationActive }))}
-              />
-            )}
-
-            {isMobile && isSidebarOpen && (
-              <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm animate-in fade-in" onClick={() => setIsSidebarOpen(false)}>
-                <div className="w-80 h-full" onClick={e => e.stopPropagation()}>
-                  <Sidebar 
-                    memory={state.memory} 
-                    mode={state.currentMode} 
-                    apiLogs={state.apiLogs}
-                    theme={activeTheme}
-                    onThemeChange={setActiveTheme}
-                    isThinkingMode={state.isThinkingMode}
-                    isSearchEnabled={state.isSearchEnabled}
-                    onToggleThinking={() => { setState(s => ({ ...s, isThinkingMode: !s.isThinkingMode, isSearchEnabled: false })); setIsSidebarOpen(false); }}
-                    onToggleSearch={() => { setState(s => ({ ...s, isSearchEnabled: !s.isSearchEnabled, isThinkingMode: false })); setIsSidebarOpen(false); }}
-                    isSimulationActive={state.isSimulationActive}
-                    onToggleSimulation={() => setState(s => ({ ...s, isSimulationActive: !s.isSimulationActive }))}
-                  />
-                </div>
-              </div>
-            )}
-
+            {!isMobile && <Sidebar memory={state.memory} mode={state.currentMode} apiLogs={state.apiLogs} theme={activeTheme} onThemeChange={setActiveTheme} isThinkingMode={state.isThinkingMode} isSearchEnabled={state.isSearchEnabled} onToggleThinking={() => setState(s => ({ ...s, isThinkingMode: !s.isThinkingMode, isSearchEnabled: false }))} onToggleSearch={() => setState(s => ({ ...s, isSearchEnabled: !s.isSearchEnabled, isThinkingMode: false }))} isSimulationActive={state.isSimulationActive} onToggleSimulation={() => setState(s => ({ ...s, isSimulationActive: !s.isSimulationActive }))} />}
             <main className="flex-1 flex flex-col relative overflow-hidden">
               <div className="flex-1 p-4 lg:p-10 flex flex-col overflow-hidden">
                  {state.hologram ? (
                    <div className="flex-1 relative">
-                      <HologramStage 
-                        imageUrl={state.hologram.imageUrl!} 
-                        subject={state.hologram.subject} 
-                        color={THEMES[activeTheme].primary}
-                        simulationActive={state.isSimulationActive}
-                      />
+                      <HologramStage imageUrl={state.hologram.imageUrl!} subject={state.hologram.subject} color={THEMES[activeTheme].primary} simulationActive={state.isSimulationActive} />
                       <div className="absolute top-4 right-4 flex gap-2 z-50">
-                        <button 
-                          onClick={() => setState(s => ({ ...s, isSimulationActive: !s.isSimulationActive }))}
-                          className={`px-4 py-2 glass rounded-full text-[10px] mono border transition-all uppercase tracking-widest ${state.isSimulationActive ? 'bg-cyan-400/20 border-cyan-400 text-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.4)]' : 'border-white/20 text-slate-400'}`}
-                        >
-                          Simulation_Mode: {state.isSimulationActive ? 'ON' : 'OFF'}
-                        </button>
-                        <button 
-                          onClick={() => setState(s => ({ ...s, hologram: null }))}
-                          className="px-4 py-2 glass rounded-full text-[10px] mono text-red-400 border border-red-400/20 hover:bg-red-400/10 transition-all uppercase tracking-widest"
-                        >
-                          Terminate_Projection
-                        </button>
+                        <button onClick={() => setState(s => ({ ...s, isSimulationActive: !s.isSimulationActive }))} className={`px-4 py-2 glass rounded-full text-[10px] mono border transition-all uppercase tracking-widest ${state.isSimulationActive ? 'bg-cyan-400/20 border-cyan-400 text-cyan-400' : 'border-white/20 text-slate-400'}`}>SIM: {state.isSimulationActive ? 'ON' : 'OFF'}</button>
+                        <button onClick={() => setState(s => ({ ...s, hologram: null }))} className="px-4 py-2 glass rounded-full text-[10px] mono text-red-400 border border-red-400/20 uppercase tracking-widest">CLOSE</button>
                       </div>
                    </div>
-                 ) : showApiConsole ? (
-                   <ApiConsole payload={lastPayload} logs={state.apiLogs} theme={activeTheme} />
-                 ) : (
-                   <ChatWindow 
-                     messages={messages} 
-                     isProcessing={state.isProcessing} 
-                     theme={activeTheme} 
-                     liveTranscript={liveTranscript}
-                     streamingText={streamingText}
-                     streamStatus={state.streamStatus}
-                   />
+                 ) : showApiConsole ? <ApiConsole payload={null} logs={state.apiLogs} theme={activeTheme} /> : (
+                   <ChatWindow messages={messages} isProcessing={state.isProcessing} theme={activeTheme} liveTranscript={liveTranscript} streamingText={streamingText} streamStatus={state.streamStatus} />
                  )}
               </div>
-
-              <ControlPanel 
-                onSend={handleSend}
-                isProcessing={state.isProcessing}
-                isVoiceEnabled={state.isVoiceEnabled}
-                isListening={state.isListening}
-                isSpeaking={state.isSpeaking}
-                theme={activeTheme}
-                onVoiceToggle={toggleVoice}
-                onModeChange={(m) => setState(s => ({ ...s, currentMode: m }))}
-                onManualHologram={(subject) => generateHologramImage(subject)}
-                isMobile={isMobile}
-                isThinkingMode={state.isThinkingMode}
-                isSearchEnabled={state.isSearchEnabled}
-                onToggleThinking={() => setState(s => ({ ...s, isThinkingMode: !s.isThinkingMode, isSearchEnabled: false }))}
-                onToggleSearch={() => setState(s => ({ ...s, isSearchEnabled: !s.isSearchEnabled, isThinkingMode: false }))}
-                isSimulationActive={state.isSimulationActive}
-                onToggleSimulation={() => setState(s => ({ ...s, isSimulationActive: !s.isSimulationActive }))}
-              />
+              <ControlPanel onSend={handleSend} isProcessing={state.isProcessing} isVoiceEnabled={state.isVoiceEnabled} isListening={state.isListening} isSpeaking={state.isSpeaking} theme={activeTheme} onVoiceToggle={toggleVoice} onModeChange={m => setState(s => ({ ...s, currentMode: m }))} onManualHologram={s => generateHologramImage(s)} isMobile={isMobile} isThinkingMode={state.isThinkingMode} isSearchEnabled={state.isSearchEnabled} onToggleThinking={() => setState(s => ({ ...s, isThinkingMode: !s.isThinkingMode, isSearchEnabled: false }))} onToggleSearch={() => setState(s => ({ ...s, isSearchEnabled: !s.isSearchEnabled, isThinkingMode: false }))} isSimulationActive={state.isSimulationActive} onToggleSimulation={() => setState(s => ({ ...s, isSimulationActive: !s.isSimulationActive }))} />
             </main>
-
-            {!isMobile && (
-              <div className="w-1/3 border-l border-white/5 bg-black/20 relative hidden lg:block">
-                <JarvisCore active={state.isProcessing} theme={activeTheme} speaking={state.isSpeaking} />
-              </div>
-            )}
+            {!isMobile && <div className="w-1/3 border-l border-white/5 bg-black/20 relative hidden lg:block"><JarvisCore active={state.isProcessing} theme={activeTheme} speaking={state.isSpeaking} /></div>}
           </div>
-
-          <button 
-            onClick={() => setShowApiConsole(!showApiConsole)}
-            className="fixed bottom-24 right-10 p-3 rounded-full glass border border-white/10 text-[10px] mono opacity-50 hover:opacity-100 transition-all z-40 hidden md:block"
-          >
-            {showApiConsole ? 'HIDE_LOGS' : 'VIEW_LOGS'}
-          </button>
         </>
       )}
     </div>
