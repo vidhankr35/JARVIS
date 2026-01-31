@@ -8,6 +8,7 @@ export interface PrimeUserProfile {
   avatar: string;
   theme: JarvisTheme;
   clearance: SubscriptionLevel;
+  accessCode: string; // New: Security layer
 }
 
 export const PRIME_USERS: Record<string, PrimeUserProfile> = {
@@ -17,7 +18,8 @@ export const PRIME_USERS: Record<string, PrimeUserProfile> = {
     specialization: 'Structural Systems & Optimization',
     avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=engineer',
     theme: 'MK_85',
-    clearance: SubscriptionLevel.PREMIUM
+    clearance: SubscriptionLevel.PREMIUM,
+    accessCode: 'STARK2025'
   },
   'JHONY': {
     id: 'SI-JHN-02',
@@ -25,7 +27,8 @@ export const PRIME_USERS: Record<string, PrimeUserProfile> = {
     specialization: 'Quantum Field Simulations',
     avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=jhony',
     theme: 'MK_5',
-    clearance: SubscriptionLevel.PREMIUM
+    clearance: SubscriptionLevel.PREMIUM,
+    accessCode: 'QUANTUM77'
   },
   'AKASH': {
     id: 'SI-AKS-03',
@@ -33,7 +36,8 @@ export const PRIME_USERS: Record<string, PrimeUserProfile> = {
     specialization: 'Neural Network Architectures',
     avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=akash',
     theme: 'MK_50',
-    clearance: SubscriptionLevel.PREMIUM
+    clearance: SubscriptionLevel.PREMIUM,
+    accessCode: 'SYNAPSE99'
   }
 };
 
