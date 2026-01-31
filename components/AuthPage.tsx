@@ -206,7 +206,7 @@ const AuthPage: React.FC<AuthPageProps> = ({ onLogin }) => {
               >
                 <div className="w-1.5 h-1.5 rounded-full bg-red-500 group-hover:animate-ping" />
                 <span className="text-[9px] font-bold uppercase tracking-widest">Admin_Override_Tony_Stark</span>
-              </button>
+               </button>
             </div>
 
             <div className="grid grid-cols-3 gap-2">
