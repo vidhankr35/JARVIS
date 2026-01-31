@@ -4,40 +4,43 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>J.A.R.V.I.S.</title>
+    <title>J.A.R.V.I.S. | Neural Interface</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Space+Mono&display=swap" rel="stylesheet">
     <style>
         :root {
-          --app-height: 100%;
+          --app-height: 100dvh;
         }
         body {
             margin: 0;
             padding: 0;
-            background-color: #020617;
+            background-color: #010409;
             color: #e2e8f0;
             font-family: 'Inter', sans-serif;
             overflow: hidden;
-            height: 100dvh; /* Use dynamic viewport height */
+            height: var(--app-height);
+            width: 100vw;
+            position: fixed; /* Prevents bounce and scroll issues on mobile */
         }
         #root {
             height: 100%;
             display: flex;
             flex-direction: column;
+            overflow: hidden;
         }
         .mono { font-family: 'Space Mono', monospace; }
         .glass {
-            background: rgba(15, 23, 42, 0.6);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(56, 189, 248, 0.2);
+            background: rgba(13, 17, 23, 0.7);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(56, 189, 248, 0.15);
         }
         .glow-cyan {
-            box-shadow: 0 0 30px rgba(34, 211, 238, 0.15);
+            box-shadow: 0 0 40px rgba(34, 211, 238, 0.1);
         }
         
         @keyframes scanline {
-          0% { bottom: 100%; }
-          100% { bottom: 0%; }
+          0% { transform: translateY(-100%); }
+          100% { transform: translateY(100%); }
         }
 
         .typing-cursor::after {
@@ -60,7 +63,7 @@
             background: transparent;
         }
         ::-webkit-scrollbar-thumb {
-            background: rgba(34, 211, 238, 0.3);
+            background: rgba(34, 211, 238, 0.2);
             border-radius: 10px;
         }
         
@@ -72,10 +75,21 @@
           pointer-events: none;
           position: absolute;
           top: 0; left: 0; width: 100%; height: 100%;
-          background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+          background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.05) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
           z-index: 1000;
-          background-size: 100% 3px, 3px 100%;
-          opacity: 0.15;
+          background-size: 100% 4px, 4px 100%;
+          opacity: 0.1;
+        }
+
+        /* Mobile specific fixes */
+        @media (max-width: 768px) {
+          .glass {
+            backdrop-filter: blur(10px);
+          }
+          input, button {
+            cursor: pointer;
+            touch-action: manipulation;
+          }
         }
     </style>
 <script type="importmap">
@@ -95,5 +109,14 @@
 <body>
     <div id="root"></div>
     <script type="module" src="/index.tsx"></script>
+    <script>
+        // Handle mobile viewport keyboard adjustment
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener('resize', () => {
+            document.body.style.height = window.visualViewport.height + 'px';
+            window.scrollTo(0, 0);
+          });
+        }
+    </script>
 </body>
 </html>

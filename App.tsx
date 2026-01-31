@@ -104,59 +104,78 @@ const App: React.FC = () => {
   const transcriptionRef = useRef({ user: '', jarvis: '' });
 
   const addLog = useCallback((log: string) => {
-    setState(prev => ({ ...prev, apiLogs: [log, ...prev.apiLogs].slice(0, 20) }));
+    setState(prev => ({ ...prev, apiLogs: [log, ...prev.apiLogs].slice(0, 30) }));
   }, []);
 
   const validateApiKey = useCallback(() => {
     const key = process.env.API_KEY;
     const isValid = !!key && key !== 'undefined' && key !== '' && key !== 'your_gemini_api_key_here';
     setState(prev => ({ ...prev, isApiValid: isValid }));
-    if (!isValid) addLog("GATEWAY_ERR: INVALID_KEY");
+    if (!isValid) addLog("GATEWAY_ERR: INVALID_KEY_DETECTED");
     return isValid;
   }, [addLog]);
 
   useEffect(() => {
     validateApiKey();
-    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+      // Force visual height update for mobile keyboards
+      if (window.visualViewport) {
+        document.body.style.height = window.visualViewport.height + 'px';
+      }
+    };
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    window.visualViewport?.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.visualViewport?.removeEventListener('resize', handleResize);
+    };
   }, [validateApiKey]);
 
-  // Initialize Chat Session
+  // Initialize Chat Session with specific model configuration
   const initChatSession = useCallback(() => {
     if (!validateApiKey()) return;
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
     
-    // Choose model based on mode
-    // Thinking Mode: gemini-3-pro-preview
-    // Search/Standard: gemini-3-flash-preview
-    const modelName = state.isThinkingMode ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
-    
-    const config: any = {
-      systemInstruction: JARVIS_SYSTEM_INSTRUCTION + (isMobile ? "\n\nCRITICAL: User is on mobile. Be extremely concise." : ""),
-      tools: [{ functionDeclarations: [HOLOGRAM_TOOL] }],
-      temperature: state.temperature
-    };
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+      
+      // Select model based on protocol requirements
+      // Deep Reasoning requires 'gemini-3-pro-preview' with max thinking budget
+      // Standard tasks use 'gemini-3-flash-preview' for speed
+      const modelName = state.isThinkingMode ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
+      
+      const config: any = {
+        systemInstruction: JARVIS_SYSTEM_INSTRUCTION + (isMobile ? "\n\nCRITICAL: User is on mobile. Be extremely concise." : ""),
+        tools: [{ functionDeclarations: [HOLOGRAM_TOOL] }],
+        temperature: state.temperature
+      };
 
-    if (state.isThinkingMode) {
-      config.thinkingConfig = { thinkingBudget: 32768 };
+      if (state.isThinkingMode) {
+        // MUST set thinkingBudget to 32768 for gemini-3-pro-preview
+        config.thinkingConfig = { thinkingBudget: 32768 };
+      }
+
+      if (state.isSearchEnabled && !state.isThinkingMode) {
+        config.tools.push({ googleSearch: {} });
+      }
+
+      chatSessionRef.current = ai.chats.create({
+        model: modelName,
+        config: config
+      });
+      addLog(`NEURAL_SESSION: SYNCED [MODEL: ${modelName.toUpperCase()}]`);
+    } catch (error: any) {
+      addLog(`INIT_FAULT: ${error.message}`);
     }
-
-    if (state.isSearchEnabled && !state.isThinkingMode) {
-      config.tools.push({ googleSearch: {} });
-    }
-
-    chatSessionRef.current = ai.chats.create({
-      model: modelName,
-      config: config
-    });
-    addLog(`NEURAL_SESSION: CREATED [MODEL: ${modelName.toUpperCase()}]`);
   }, [validateApiKey, state.temperature, state.isThinkingMode, state.isSearchEnabled, addLog, isMobile]);
 
-  // Re-init session if modes change
+  // Handle protocol transitions
   useEffect(() => {
-    if (currentUser) initChatSession();
-  }, [state.isThinkingMode, state.isSearchEnabled]);
+    if (currentUser) {
+      addLog("RECALIBRATING_PROTOCOLS...");
+      initChatSession();
+    }
+  }, [state.isThinkingMode, state.isSearchEnabled, currentUser]);
 
   const handleLogin = useCallback((user: User) => {
     setCurrentUser(user);
@@ -281,7 +300,7 @@ const App: React.FC = () => {
 
   const generateHologram = async (subject: string) => {
     if (!validateApiKey()) return;
-    addLog(`PROJECTION: ${subject}`);
+    addLog(`PROJECTION_SEQ: ${subject}`);
     setState(prev => ({ ...prev, isProcessing: true }));
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
@@ -292,10 +311,10 @@ const App: React.FC = () => {
       const img = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
       if (img?.inlineData) {
         setState(prev => ({ ...prev, isProcessing: false, hologram: { subject, imageUrl: `data:image/png;base64,${img.inlineData.data}` } }));
-        addLog("RESPONSE: 200 OK");
+        addLog("PROJECTION: ONLINE");
       }
-    } catch (e) {
-      addLog("RESPONSE: 500 ERR");
+    } catch (e: any) {
+      addLog(`PROJECTION_ERR: ${e.message}`);
       setState(prev => ({ ...prev, isProcessing: false }));
     }
   };
@@ -303,22 +322,28 @@ const App: React.FC = () => {
   const handleSendMessage = async (text: string, imageData?: string) => {
     if (!text.trim() && !imageData) return;
     
+    // Ensure session is initialized
     if (!chatSessionRef.current) {
       initChatSession();
-      if (!chatSessionRef.current) return;
+      if (!chatSessionRef.current) {
+        addLog("CORE_FAULT: SESSION_INIT_FAILED");
+        return;
+      }
     }
 
     const userMsg: Message = { id: `u-${Date.now()}`, role: MessageRole.USER, text, timestamp: Date.now(), image: imageData };
     setMessages(prev => [...prev, userMsg]);
-    setState(prev => ({ 
-      ...prev, 
-      isProcessing: true, 
-      streamStatus: state.isThinkingMode ? 'NEURAL_SYNAPSE_FIRING' : 'OPTIMIZING_COGNITION' 
-    }));
+    
+    // UI Feedback for latency expectations
+    const processingStatus = state.isThinkingMode 
+      ? 'DEEP_SYNAPSE_FIRING (32K_BUDGET)' 
+      : state.isSearchEnabled ? 'WEB_GROUNDING_ACTIVE' : 'OPTIMIZING_COGNITION';
+    
+    setState(prev => ({ ...prev, isProcessing: true, streamStatus: processingStatus }));
     setStreamingText('');
     
     const startTime = Date.now();
-    addLog(`UPLINK_SENT [${state.isThinkingMode ? 'THINK' : 'STD'}]: ${text.substring(0, 15)}...`);
+    addLog(`UPLINK: ${text.substring(0, 20)}...`);
 
     try {
       const messageInput = imageData ? {
@@ -334,12 +359,10 @@ const App: React.FC = () => {
       let fullThinking = '';
       let groundingLinks: GroundingLink[] = [];
 
-      setState(prev => ({ ...prev, streamStatus: 'RECONSTRUCTING_DATA' }));
-
       for await (const chunk of stream) {
-        // Handle thinking part
+        // Correct chunk thought extraction
         const thinkingPart = chunk.candidates?.[0]?.content?.parts?.find(p => p.thought);
-        if (thinkingPart) {
+        if (thinkingPart?.thought) {
           fullThinking += thinkingPart.thought;
         }
 
@@ -347,10 +370,12 @@ const App: React.FC = () => {
         if (chunkText) {
           fullText += chunkText;
           setStreamingText(fullText);
+          setState(prev => ({ ...prev, streamStatus: 'STREAMING_REPLY' }));
         }
 
-        // Extract grounding chunks if available
-        const chunks = chunk.candidates?.[0]?.groundingMetadata?.groundingChunks;
+        // Correct grounding links extraction
+        const groundingMetadata = chunk.candidates?.[0]?.groundingMetadata;
+        const chunks = groundingMetadata?.groundingChunks;
         if (chunks) {
           chunks.forEach((c: any) => {
             if (c.web?.uri && c.web?.title) {
@@ -361,8 +386,10 @@ const App: React.FC = () => {
           });
         }
 
-        if (chunk.candidates?.[0]?.content?.parts) {
-          for (const part of chunk.candidates[0].content.parts) {
+        // Handle tool calls in stream
+        const parts = chunk.candidates?.[0]?.content?.parts;
+        if (parts) {
+          for (const part of parts) {
             if (part.functionCall && part.functionCall.name === 'generate_hologram') {
               const args = part.functionCall.args as { subject: string };
               generateHologram(args.subject);
@@ -371,20 +398,31 @@ const App: React.FC = () => {
         }
       }
 
-      addLog(`RESPONSE_RECEIVED: ${Date.now() - startTime}ms`);
+      addLog(`DOWNLINK_COMPLETE: ${Date.now() - startTime}ms`);
       setMessages(prev => [...prev, { 
         id: `j-${Date.now()}`, 
         role: MessageRole.JARVIS, 
-        text: fullText || "Neural processing complete.", 
+        text: fullText || "Sir, I've processed the request but the output stream was empty. Retrying uplink might be necessary.", 
         timestamp: Date.now(),
         thinking: fullThinking || undefined,
         groundingLinks: groundingLinks.length > 0 ? groundingLinks : undefined
       }]);
       setStreamingText('');
-      setState(prev => ({ ...prev, streamStatus: 'SYNC_COMPLETE' }));
     } catch (e: any) {
-      addLog(`CORE_FAULT: ${e.message}`);
-      setMessages(prev => [...prev, { id: `err-${Date.now()}`, role: MessageRole.JARVIS, text: ERROR_MESSAGES.GENERIC, timestamp: Date.now(), isError: true }]);
+      const realError = e.message || "Unknown neural instability";
+      addLog(`CORE_FAULT: ${realError}`);
+      
+      let displayError = ERROR_MESSAGES.GENERIC;
+      if (realError.toLowerCase().includes('quota')) displayError = ERROR_MESSAGES.QUOTA;
+      if (realError.toLowerCase().includes('safety')) displayError = ERROR_MESSAGES.SAFETY;
+      
+      setMessages(prev => [...prev, { 
+        id: `err-${Date.now()}`, 
+        role: MessageRole.JARVIS, 
+        text: `${displayError}\n\n[DETAILED_FAULT: ${realError}]`, 
+        timestamp: Date.now(), 
+        isError: true 
+      }]);
     } finally {
       setState(prev => ({ ...prev, isProcessing: false, streamStatus: null }));
     }
@@ -394,7 +432,6 @@ const App: React.FC = () => {
 
   return (
     <div className="h-full w-full bg-[#010409] text-slate-100 flex overflow-hidden font-mono text-xs selection:bg-cyan-500/30 relative">
-      {/* Sidebar - Conditional Drawer for Mobile */}
       <div className={`fixed inset-y-0 left-0 z-50 transform transition-transform duration-300 lg:relative lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <Sidebar 
           memory={state.memory} 
@@ -404,13 +441,13 @@ const App: React.FC = () => {
           onThemeChange={(t) => setActiveTheme(t)} 
           isThinkingMode={state.isThinkingMode}
           isSearchEnabled={state.isSearchEnabled}
-          onToggleThinking={() => setState(s => ({...s, isThinkingMode: !s.isThinkingMode, isSearchEnabled: s.isThinkingMode ? s.isSearchEnabled : false }))}
-          onToggleSearch={() => setState(s => ({...s, isSearchEnabled: !s.isSearchEnabled, isThinkingMode: s.isSearchEnabled ? s.isThinkingMode : false }))}
+          onToggleThinking={() => setState(s => ({...s, isThinkingMode: !s.isThinkingMode, isSearchEnabled: !s.isThinkingMode ? false : s.isSearchEnabled }))}
+          onToggleSearch={() => setState(s => ({...s, isSearchEnabled: !s.isSearchEnabled, isThinkingMode: !s.isSearchEnabled ? false : s.isThinkingMode }))}
         />
-        {isMobile && isSidebarOpen && <button onClick={() => setIsSidebarOpen(false)} className="fixed top-4 right-[-40px] w-8 h-8 glass flex items-center justify-center rounded-r-lg text-cyan-400">×</button>}
+        {isMobile && isSidebarOpen && <button onClick={() => setIsSidebarOpen(false)} className="fixed top-4 right-[-44px] w-10 h-10 glass flex items-center justify-center rounded-r-lg text-cyan-400 font-black">×</button>}
       </div>
 
-      {isMobile && isSidebarOpen && <div className="fixed inset-0 bg-black/60 z-40" onClick={() => setIsSidebarOpen(false)} />}
+      {isMobile && isSidebarOpen && <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-40" onClick={() => setIsSidebarOpen(false)} />}
       
       <main className="flex-1 flex flex-col relative overflow-hidden">
         <Header user={currentUser} theme={activeTheme} speaking={state.isSpeaking} listening={state.isListening} onLogout={handleLogout} apiOk={state.isApiValid} onToggleMenu={() => setIsSidebarOpen(!isSidebarOpen)} isMobile={isMobile} />
@@ -418,11 +455,11 @@ const App: React.FC = () => {
         <div className="flex-1 relative flex flex-col overflow-hidden">
           {!isMobile && (
             <div className="absolute top-4 right-4 z-50 flex gap-2">
-               <button onClick={() => setShowApiConsole(!showApiConsole)} className={`px-3 py-1 border rounded transition-all ${showApiConsole ? 'bg-cyan-500/20 border-cyan-400 text-cyan-400' : 'border-white/10 text-slate-500 hover:border-white/30'}`}>API_CONSOLE</button>
+               <button onClick={() => setShowApiConsole(!showApiConsole)} className={`px-3 py-1 border rounded transition-all ${showApiConsole ? 'bg-cyan-500/20 border-cyan-400 text-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.2)]' : 'border-white/10 text-slate-500 hover:border-white/30'}`}>API_DEBUG</button>
             </div>
           )}
 
-          <div className="absolute inset-0 z-0 opacity-20 pointer-events-none">
+          <div className="absolute inset-0 z-0 opacity-15 pointer-events-none">
             <JarvisCore active={state.isProcessing} theme={activeTheme} speaking={state.isSpeaking} />
           </div>
 
@@ -436,9 +473,9 @@ const App: React.FC = () => {
             )}
             
             {state.hologram && (
-              <div className={`${isMobile ? 'h-64' : 'w-[400px] h-full'} glass border border-white/10 rounded-2xl overflow-hidden relative animate-in zoom-in-95 duration-500 shrink-0`}>
+              <div className={`${isMobile ? 'h-64 mt-4' : 'w-[450px] h-full'} glass border border-white/10 rounded-2xl overflow-hidden relative animate-in zoom-in-95 duration-500 shadow-2xl shrink-0`}>
                 <HologramStage imageUrl={state.hologram.imageUrl!} subject={state.hologram.subject} color={THEMES[activeTheme].primary} />
-                <button onClick={() => setState(s => ({...s, hologram: null}))} className="absolute bottom-4 right-4 px-3 py-1 bg-red-500/20 border border-red-500/50 rounded text-[9px] text-red-500 hover:bg-red-500/30 transition-all">TERMINATE</button>
+                <button onClick={() => setState(s => ({...s, hologram: null}))} className="absolute bottom-4 right-4 px-4 py-2 bg-red-500/20 border border-red-500/50 rounded-lg text-[10px] font-bold text-red-500 hover:bg-red-500/30 transition-all uppercase">Deactivate</button>
               </div>
             )}
           </div>
