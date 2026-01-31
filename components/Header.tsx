@@ -9,15 +9,16 @@ interface HeaderProps {
   user: User;
   theme: JarvisTheme;
   onLogout: () => void;
+  apiOk: boolean | null;
 }
 
-const Header: React.FC<HeaderProps> = ({ speaking, listening, user, theme, onLogout }) => {
+const Header: React.FC<HeaderProps> = ({ speaking, listening, user, theme, onLogout, apiOk }) => {
   const [cpuLoad, setCpuLoad] = useState('12%');
   const themeColors = THEMES[theme];
   
   useEffect(() => {
     const interval = setInterval(() => {
-      const load = Math.floor(Math.random() * (speaking ? 20 : 5)) + (speaking ? 50 : 8);
+      const load = Math.floor(Math.random() * (speaking ? 20 : 5)) + (speaking ? 40 : 8);
       setCpuLoad(`${load}%`);
     }, 2000);
     return () => clearInterval(interval);
@@ -35,9 +36,9 @@ const Header: React.FC<HeaderProps> = ({ speaking, listening, user, theme, onLog
         <div>
           <h1 className="text-2xl font-black tracking-[0.3em] mono uppercase" style={{ color: themeColors.primary }}>J.A.R.V.I.S.</h1>
           <div className="flex items-center gap-2">
-            <span className="text-[8px] mono opacity-40 uppercase tracking-widest">Protocol</span>
-            <span className="text-[9px] px-2 py-0.5 rounded-full mono font-bold border" style={{ color: themeColors.accent, borderColor: `${themeColors.accent}33`, backgroundColor: `${themeColors.accent}11` }}>
-              {theme}
+            <span className="text-[8px] mono opacity-40 uppercase tracking-widest">Neural_Link:</span>
+            <span className={`text-[8px] mono font-bold uppercase ${apiOk === false ? 'text-red-500 animate-pulse' : 'text-green-500'}`}>
+              {apiOk === false ? 'OFFLINE' : 'OPERATIONAL'}
             </span>
           </div>
         </div>
@@ -68,12 +69,8 @@ const Header: React.FC<HeaderProps> = ({ speaking, listening, user, theme, onLog
                 <div className="w-full h-full flex items-center justify-center mono text-lg" style={{ color: themeColors.primary }}>{user.username[0]}</div>
               )}
             </div>
-            {/* User Dropdown */}
             <div className="absolute top-full right-0 mt-2 w-48 glass border border-white/10 rounded-xl opacity-0 translate-y-2 pointer-events-none group-hover:opacity-100 group-hover:translate-y-0 transition-all z-50 p-2">
-              <button 
-                onClick={onLogout}
-                className="w-full text-left px-4 py-2 text-[10px] mono text-red-400 hover:bg-red-500/10 rounded-lg transition-all flex items-center gap-3"
-              >
+              <button onClick={onLogout} className="w-full text-left px-4 py-2 text-[10px] mono text-red-400 hover:bg-red-500/10 rounded-lg transition-all flex items-center gap-3">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
                 TERMINATE_SESSION
               </button>

@@ -52,10 +52,10 @@ async function decodeAudioData(
 
 const HOLOGRAM_TOOL: FunctionDeclaration = {
   name: 'generate_hologram',
-  description: 'Projects a 3D technical holographic visual. Use ONLY for blueprints, schematics, molecular structures, or complex 3D mechanical models. DO NOT use for plain text or simple concepts.',
+  description: 'Projects a 3D technical holographic visual. Use ONLY for blueprints, schematics, molecular structures, or complex 3D mechanical models.',
   parameters: {
     type: Type.OBJECT,
-    properties: { subject: { type: Type.STRING, description: 'The specific technical object to project (e.g., "Arc Reactor Blueprint", "Carbon Nanotube Lattice")' } },
+    properties: { subject: { type: Type.STRING, description: 'The specific technical object to project' } },
     required: ['subject']
   }
 };
@@ -66,15 +66,14 @@ const App: React.FC = () => {
   const [activeTheme, setActiveTheme] = useState<JarvisTheme>('MK_85');
   const [showApiConsole, setShowApiConsole] = useState(false);
   const [lastPayload, setLastPayload] = useState<any>(null);
-
-  // Added liveTranscript to track real-time speech
   const [liveTranscript, setLiveTranscript] = useState({ user: '', jarvis: '' });
 
   const [state, setState] = useState<JarvisState & { 
     apiLogs: string[], 
     hologram: { subject: string, imageUrl: string | null } | null,
     temperature: number,
-    thinkingBudget: number
+    thinkingBudget: number,
+    isApiValid: boolean | null
   }>({
     isProcessing: false,
     isListening: false,
@@ -84,8 +83,9 @@ const App: React.FC = () => {
     memory: ["Neural link calibrated.", "Stark Gateway Online."],
     apiLogs: ["CORE_READY", "API_V1_INIT"],
     hologram: null,
-    temperature: 0.7,
-    thinkingBudget: 16000
+    temperature: 0.8,
+    thinkingBudget: 12000,
+    isApiValid: null
   });
 
   const sessionRef = useRef<any>(null);
@@ -102,18 +102,19 @@ const App: React.FC = () => {
 
   const validateApiKey = useCallback(() => {
     const key = process.env.API_KEY;
-    if (!key || key === 'undefined' || key === 'API_KEY') {
-      addLog("GATEWAY_ERR: KEY_NOT_FOUND");
-      return false;
-    }
-    return true;
+    const isValid = !!key && key !== 'undefined' && key !== '' && key !== 'your_gemini_api_key_here';
+    setState(prev => ({ ...prev, isApiValid: isValid }));
+    if (!isValid) addLog("GATEWAY_ERR: INVALID_KEY");
+    return isValid;
   }, [addLog]);
+
+  useEffect(() => {
+    validateApiKey();
+  }, [validateApiKey]);
 
   const handleLogin = useCallback((user: User) => {
     setCurrentUser(user);
-    if (user.preferredTheme) {
-      setActiveTheme(user.preferredTheme);
-    }
+    if (user.preferredTheme) setActiveTheme(user.preferredTheme);
     
     const profile = Object.values(PRIME_USERS).find(p => p.name.toUpperCase() === user.username.toUpperCase());
     const greetingText = profile 
@@ -131,283 +132,175 @@ const App: React.FC = () => {
   }, [addLog]);
 
   const handleLogout = useCallback(() => {
-    if (sessionRef.current) {
-      sessionRef.current.close();
-      sessionRef.current = null;
-    }
+    if (sessionRef.current) sessionRef.current.close();
     if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
-    if (inAudioCtxRef.current) inAudioCtxRef.current.close().catch(() => {});
-    if (outAudioCtxRef.current) outAudioCtxRef.current.close().catch(() => {});
-    
     setCurrentUser(null);
     setMessages([]);
-    setState(prev => ({
-      ...prev,
-      isVoiceEnabled: false,
-      isListening: false,
-      isSpeaking: false,
-      isProcessing: false,
-      hologram: null
-    }));
+    setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false, isSpeaking: false, hologram: null }));
     addLog("SESSION_TERMINATED");
   }, [addLog]);
 
   const toggleVoice = async () => {
     if (state.isVoiceEnabled) {
       sessionRef.current?.close();
-      if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
-      if (inAudioCtxRef.current) inAudioCtxRef.current.close().catch(() => {});
-      if (outAudioCtxRef.current) outAudioCtxRef.current.close().catch(() => {});
       setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false, isSpeaking: false }));
-      setLiveTranscript({ user: '', jarvis: '' });
-      addLog("VOICE_LINK: SEVERED");
       return;
     }
 
     if (!validateApiKey()) {
-      setMessages(prev => [...prev, {
-        id: `err-voice-${Date.now()}`,
-        role: MessageRole.JARVIS,
-        text: "Sir, I cannot establish a voice link without a valid API_KEY uplink.",
-        timestamp: Date.now(),
-        isError: true
-      }]);
+      setMessages(prev => [...prev, { id: `err-voice-${Date.now()}`, role: MessageRole.JARVIS, text: ERROR_MESSAGES.MISSING_KEY, timestamp: Date.now(), isError: true }]);
       return;
     }
 
     try {
-      addLog("VOICE_LINK: INITIALIZING");
+      addLog("VOICE_LINK: INIT");
       setState(prev => ({ ...prev, isVoiceEnabled: true, isProcessing: true }));
-
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-      
       outAudioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       inAudioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-
-      await outAudioCtxRef.current.resume();
-      await inAudioCtxRef.current.resume();
-
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
       const sessionPromise = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-12-2025',
         callbacks: {
           onopen: () => {
-            addLog("VOICE_LINK: ESTABLISHED");
+            addLog("VOICE_LINK: LIVE");
             setState(prev => ({ ...prev, isProcessing: false, isListening: true }));
-
             const source = inAudioCtxRef.current!.createMediaStreamSource(stream);
-            const scriptProcessor = inAudioCtxRef.current!.createScriptProcessor(8192, 1, 1);
-            
+            const scriptProcessor = inAudioCtxRef.current!.createScriptProcessor(4096, 1, 1);
             scriptProcessor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
               const int16 = new Int16Array(inputData.length);
-              for (let i = 0; i < inputData.length; i++) {
-                int16[i] = inputData[i] * 32768;
-              }
-              const pcmBlob = {
-                data: encode(new Uint8Array(int16.buffer)),
-                mimeType: 'audio/pcm;rate=16000',
-              };
-              sessionPromise.then(s => {
-                 if (s && state.isVoiceEnabled) s.sendRealtimeInput({ media: pcmBlob });
-              });
+              for (let i = 0; i < inputData.length; i++) int16[i] = inputData[i] * 32768;
+              sessionPromise.then(s => s.sendRealtimeInput({ media: { data: encode(new Uint8Array(int16.buffer)), mimeType: 'audio/pcm;rate=16000' } }));
             };
-
             source.connect(scriptProcessor);
             scriptProcessor.connect(inAudioCtxRef.current!.destination);
-
-            // Keep-alive heartbeat to prevent 500 errors on idle
-            heartbeatRef.current = window.setInterval(() => {
-              const silentPcm = new Int16Array(100).fill(0);
-              sessionPromise.then(s => {
-                if (s) s.sendRealtimeInput({ media: { data: encode(new Uint8Array(silentPcm.buffer)), mimeType: 'audio/pcm;rate=16000' } });
-              });
-            }, 30000);
           },
           onmessage: async (message: LiveServerMessage) => {
-            // Streaming transcriptions for immediate visual feedback
             if (message.serverContent?.inputTranscription) {
-              const text = message.serverContent.inputTranscription.text;
-              transcriptionRef.current.user += text;
+              transcriptionRef.current.user += message.serverContent.inputTranscription.text;
               setLiveTranscript(prev => ({ ...prev, user: transcriptionRef.current.user }));
             }
             if (message.serverContent?.outputTranscription) {
-              const text = message.serverContent.outputTranscription.text;
-              transcriptionRef.current.jarvis += text;
+              transcriptionRef.current.jarvis += message.serverContent.outputTranscription.text;
               setLiveTranscript(prev => ({ ...prev, jarvis: transcriptionRef.current.jarvis }));
             }
-
             if (message.serverContent?.turnComplete) {
-              const userText = transcriptionRef.current.user;
-              const jarvisText = transcriptionRef.current.jarvis;
-              
-              if (userText || jarvisText) {
-                setMessages(prev => [
-                  ...prev,
-                  ...(userText ? [{ id: `uv-${Date.now()}`, role: MessageRole.USER, text: userText, timestamp: Date.now() }] : []),
-                  ...(jarvisText ? [{ id: `jv-${Date.now()}`, role: MessageRole.JARVIS, text: jarvisText, timestamp: Date.now() }] : [])
+              const uText = transcriptionRef.current.user;
+              const jText = transcriptionRef.current.jarvis;
+              if (uText || jText) {
+                setMessages(prev => [...prev, 
+                  ...(uText ? [{ id: `uv-${Date.now()}`, role: MessageRole.USER, text: uText, timestamp: Date.now() }] : []),
+                  ...(jText ? [{ id: `jv-${Date.now()}`, role: MessageRole.JARVIS, text: jText, timestamp: Date.now() }] : [])
                 ]);
                 transcriptionRef.current = { user: '', jarvis: '' };
                 setLiveTranscript({ user: '', jarvis: '' });
               }
             }
-
             const audioData = message.serverContent?.modelTurn?.parts[0]?.inlineData?.data;
             if (audioData) {
-              if (outAudioCtxRef.current?.state === 'suspended') {
-                await outAudioCtxRef.current.resume();
-              }
               setState(prev => ({ ...prev, isSpeaking: true }));
-              const ctx = outAudioCtxRef.current!;
-              nextStartTimeRef.current = Math.max(nextStartTimeRef.current, ctx.currentTime);
-              
-              const buffer = await decodeAudioData(decode(audioData), ctx, 24000, 1);
-              const source = ctx.createBufferSource();
+              const buffer = await decodeAudioData(decode(audioData), outAudioCtxRef.current!, 24000, 1);
+              const source = outAudioCtxRef.current!.createBufferSource();
               source.buffer = buffer;
-              source.connect(ctx.destination);
+              source.connect(outAudioCtxRef.current!.destination);
               source.onended = () => {
                 audioSourcesRef.current.delete(source);
-                if (audioSourcesRef.current.size === 0) {
-                  setState(prev => ({ ...prev, isSpeaking: false }));
-                }
+                if (audioSourcesRef.current.size === 0) setState(prev => ({ ...prev, isSpeaking: false }));
               };
               source.start(nextStartTimeRef.current);
               nextStartTimeRef.current += buffer.duration;
               audioSourcesRef.current.add(source);
             }
-
-            if (message.serverContent?.interrupted) {
-              audioSourcesRef.current.forEach(s => { try { s.stop(); } catch(e){} });
-              audioSourcesRef.current.clear();
-              nextStartTimeRef.current = 0;
-              setState(prev => ({ ...prev, isSpeaking: false }));
-              setLiveTranscript({ user: '', jarvis: '' });
-              transcriptionRef.current = { user: '', jarvis: '' };
-              addLog("VOICE_LINK: INTERRUPTED");
-            }
           },
-          onclose: () => {
-            addLog("VOICE_LINK: CLOSED");
-            setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false, isSpeaking: false }));
-            if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
-          },
-          onerror: (e) => {
-            console.error("Voice Error:", e);
-            addLog("VOICE_LINK: ERR_INTERNAL");
-            setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false }));
-          }
+          onclose: () => setState(prev => ({ ...prev, isVoiceEnabled: false, isListening: false, isSpeaking: false })),
+          onerror: (e) => { addLog("VOICE_LINK: ERR"); setState(prev => ({ ...prev, isVoiceEnabled: false })); }
         },
         config: {
           responseModalities: [Modality.AUDIO],
-          systemInstruction: JARVIS_SYSTEM_INSTRUCTION + `\nVOICE_PROTOCOL: Active. Be extremely witty, fast-paced, and sophisticated. Use the user's name often. Keep audio responses concise. No robotic fillers.`,
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Fenrir' } } // Switched to Fenrir for a more 'Jarvis' tone
-          },
+          systemInstruction: JARVIS_SYSTEM_INSTRUCTION,
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Fenrir' } } },
           inputAudioTranscription: {},
-          outputAudioTranscription: {},
-          thinkingConfig: { thinkingBudget: 0 }
+          outputAudioTranscription: {}
         }
       });
       sessionRef.current = await sessionPromise;
-
     } catch (e) {
-      console.error(e);
       setState(prev => ({ ...prev, isVoiceEnabled: false }));
-      addLog("VOICE_LINK: HANDSHAKE_FAILED");
+      addLog("VOICE_LINK: FAIL");
     }
   };
 
   const generateHologram = async (subject: string) => {
     if (!validateApiKey()) return;
-    addLog(`API_CALL: /v1/hologram/${subject}`);
+    addLog(`PROJECTION: ${subject}`);
     setState(prev => ({ ...prev, isProcessing: true }));
-    
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
-        contents: { parts: [{ text: `High-detail blueprint of ${subject}, physics schematic style, cyan blueprints.` }] }
+        contents: `Blueprint/schematic of ${subject}, cyan technical drawing, stark industries style.`
       });
-      
-      const imgPart = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
-      if (imgPart?.inlineData) {
-        setState(prev => ({ 
-          ...prev, 
-          isProcessing: false,
-          hologram: { subject, imageUrl: `data:image/png;base64,${imgPart.inlineData.data}` } 
-        }));
-        addLog(`RESPONSE: 200 OK (BINARY_DATA)`);
+      const img = response.candidates?.[0]?.content?.parts.find(p => p.inlineData);
+      if (img?.inlineData) {
+        setState(prev => ({ ...prev, isProcessing: false, hologram: { subject, imageUrl: `data:image/png;base64,${img.inlineData.data}` } }));
+        addLog("RESPONSE: 200 OK");
       }
     } catch (e) {
-      addLog(`RESPONSE: 500 ERR`);
+      addLog("RESPONSE: 500 ERR");
       setState(prev => ({ ...prev, isProcessing: false }));
     }
   };
 
   const handleSendMessage = async (text: string, imageData?: string) => {
     if (!text.trim() && !imageData) return;
-    if (!validateApiKey()) return;
+    if (!validateApiKey()) {
+      setMessages(prev => [...prev, { id: `err-${Date.now()}`, role: MessageRole.JARVIS, text: ERROR_MESSAGES.MISSING_KEY, timestamp: Date.now(), isError: true }]);
+      return;
+    }
 
     const userMsg: Message = { id: `u-${Date.now()}`, role: MessageRole.USER, text, timestamp: Date.now(), image: imageData };
     setMessages(prev => [...prev, userMsg]);
     setState(prev => ({ ...prev, isProcessing: true }));
-    
-    const payload = {
-      model: "stark-neural-1.0",
-      prompt: text,
-      config: { temperature: state.temperature, thinking_budget: state.thinkingBudget }
-    };
-    setLastPayload(payload);
-    addLog(`POST: /api/v1/jarvis/think`);
+    addLog(`POST: /v1/chat`);
 
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
       const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
-        contents: { parts: [{ text }] },
+        model: 'gemini-3-flash-preview', // Switched to Flash for speed/free-tier reliability
+        contents: text,
         config: {
-          systemInstruction: JARVIS_SYSTEM_INSTRUCTION + "\n\nCRITICAL: If you trigger a function, you MUST still provide a text response explaining what you are doing. Never return an empty text field. ONLY use the hologram tool for technical visualizations.",
+          systemInstruction: JARVIS_SYSTEM_INSTRUCTION,
           tools: [{ functionDeclarations: [HOLOGRAM_TOOL] }],
-          thinkingConfig: { thinkingBudget: state.thinkingBudget },
           temperature: state.temperature
         }
       });
 
-      addLog(`RESPONSE: 200 OK (JSON_STARK)`);
-      
-      let textOutput = response.text;
-      
-      if (!textOutput && response.functionCalls) {
-        const fc = response.functionCalls[0];
-        if (fc.name === 'generate_hologram') {
-          textOutput = `Sir, I am initializing a holographic projection of the ${fc.args.subject}. Calibrating spatial emitters now.`;
-        }
-      }
-      
-      if (!textOutput) textOutput = "Neural processing complete. Standing by for further directives.";
-      
-      setMessages(prev => [...prev, {
-        id: `j-${Date.now()}`,
-        role: MessageRole.JARVIS,
-        text: textOutput!,
-        timestamp: Date.now(),
-        groundingLinks: response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((c: any) => ({
-          title: c.web?.title || 'Data Stream',
-          uri: c.web?.uri
-        }))
-      }]);
-
+      let textOutput = response.text || "";
       if (response.functionCalls) {
         for (const fc of response.functionCalls) {
           if (fc.name === 'generate_hologram') {
             generateHologram(fc.args.subject as string);
+            if (!textOutput) textOutput = `Certainly, Sir. Initializing holographic projection of the ${fc.args.subject} now.`;
           }
         }
       }
-    } catch (e) {
+
+      setMessages(prev => [...prev, {
+        id: `j-${Date.now()}`,
+        role: MessageRole.JARVIS,
+        text: textOutput || "Neural processing complete, Sir.",
+        timestamp: Date.now(),
+        groundingLinks: response.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((c: any) => ({
+          title: c.web?.title || 'Telemetry Source',
+          uri: c.web?.uri
+        }))
+      }]);
+    } catch (e: any) {
       addLog(`RESPONSE: 500 ERR`);
-      setState(prev => ({ ...prev, isProcessing: false }));
+      const errorMsg = e.message?.includes('quota') ? ERROR_MESSAGES.QUOTA : ERROR_MESSAGES.GENERIC;
+      setMessages(prev => [...prev, { id: `err-${Date.now()}`, role: MessageRole.JARVIS, text: errorMsg, timestamp: Date.now(), isError: true }]);
     } finally {
       setState(prev => ({ ...prev, isProcessing: false }));
     }
@@ -416,32 +309,15 @@ const App: React.FC = () => {
   if (!currentUser) return <AuthPage onLogin={handleLogin} />;
 
   return (
-    <div className="h-screen w-screen bg-[#010409] text-slate-100 flex overflow-hidden font-mono text-xs">
-      <Sidebar 
-        memory={state.memory} 
-        mode={state.currentMode} 
-        apiLogs={state.apiLogs} 
-        theme={activeTheme}
-        onThemeChange={(t) => setActiveTheme(t)}
-      />
+    <div className="h-screen w-screen bg-[#010409] text-slate-100 flex overflow-hidden font-mono text-xs selection:bg-cyan-500/30">
+      <Sidebar memory={state.memory} mode={state.currentMode} apiLogs={state.apiLogs} theme={activeTheme} onThemeChange={(t) => setActiveTheme(t)} />
       
       <main className="flex-1 flex flex-col relative">
-        <Header 
-          user={currentUser} 
-          theme={activeTheme} 
-          speaking={state.isSpeaking}
-          listening={state.isListening}
-          onLogout={handleLogout}
-        />
+        <Header user={currentUser} theme={activeTheme} speaking={state.isSpeaking} listening={state.isListening} onLogout={handleLogout} apiOk={state.isApiValid} />
         
         <div className="flex-1 relative flex flex-col overflow-hidden">
           <div className="absolute top-4 right-4 z-50 flex gap-2">
-             <button 
-              onClick={() => setShowApiConsole(!showApiConsole)}
-              className={`px-3 py-1 border rounded transition-all ${showApiConsole ? 'bg-cyan-500/20 border-cyan-400 text-cyan-400' : 'border-white/10 text-slate-500 hover:border-white/30'}`}
-             >
-               API_CONSOLE
-             </button>
+             <button onClick={() => setShowApiConsole(!showApiConsole)} className={`px-3 py-1 border rounded transition-all ${showApiConsole ? 'bg-cyan-500/20 border-cyan-400 text-cyan-400' : 'border-white/10 text-slate-500 hover:border-white/30'}`}>API_CONSOLE</button>
           </div>
 
           <div className="absolute inset-0 z-0 opacity-20 pointer-events-none">
@@ -450,40 +326,23 @@ const App: React.FC = () => {
 
           <div className="flex-1 z-10 p-6 flex gap-6 overflow-hidden">
             <div className={`flex-1 flex flex-col transition-all duration-500 ${showApiConsole ? 'w-1/2' : 'w-full'}`}>
-              <ChatWindow 
-                messages={messages} 
-                isProcessing={state.isProcessing} 
-                theme={activeTheme} 
-                liveTranscript={liveTranscript}
-              />
+              <ChatWindow messages={messages} isProcessing={state.isProcessing} theme={activeTheme} liveTranscript={liveTranscript} />
             </div>
 
             {showApiConsole && (
-              <div className="w-1/2 flex flex-col animate-in slide-in-from-right-10">
-                 <ApiConsole payload={lastPayload} logs={state.apiLogs} theme={activeTheme} />
-              </div>
+              <div className="w-1/2 flex flex-col animate-in slide-in-from-right-10"><ApiConsole payload={lastPayload} logs={state.apiLogs} theme={activeTheme} /></div>
             )}
             
             {state.hologram && !showApiConsole && (
               <div className="w-[400px] h-full glass border border-white/10 rounded-2xl overflow-hidden relative animate-in zoom-in-95 duration-500">
                 <HologramStage imageUrl={state.hologram.imageUrl!} subject={state.hologram.subject} color={THEMES[activeTheme].primary} />
-                <button onClick={() => setState(s => ({...s, hologram: null}))} className="absolute bottom-4 right-4 px-3 py-1 bg-red-500/20 border border-red-500/50 rounded text-[9px] text-red-500 uppercase hover:bg-red-500/30 transition-all">Clear_Projection</button>
+                <button onClick={() => setState(s => ({...s, hologram: null}))} className="absolute bottom-4 right-4 px-3 py-1 bg-red-500/20 border border-red-500/50 rounded text-[9px] text-red-500 hover:bg-red-500/30 transition-all">TERMINATE_PROJECTION</button>
               </div>
             )}
           </div>
         </div>
 
-        <ControlPanel 
-          theme={activeTheme}
-          isProcessing={state.isProcessing}
-          isVoiceEnabled={state.isVoiceEnabled}
-          isListening={state.isListening}
-          isSpeaking={state.isSpeaking}
-          onSend={handleSendMessage}
-          onVoiceToggle={toggleVoice}
-          onModeChange={(m) => setState(prev => ({ ...prev, currentMode: m }))}
-          onManualHologram={generateHologram}
-        />
+        <ControlPanel theme={activeTheme} isProcessing={state.isProcessing} isVoiceEnabled={state.isVoiceEnabled} isListening={state.isListening} isSpeaking={state.isSpeaking} onSend={handleSendMessage} onVoiceToggle={toggleVoice} onModeChange={(m) => setState(prev => ({ ...prev, currentMode: m }))} onManualHologram={generateHologram} />
       </main>
       <div className="crt-overlay" />
     </div>
