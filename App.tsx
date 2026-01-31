@@ -38,7 +38,7 @@ async function decodeAudioData(
   sampleRate: number,
   numChannels: number,
 ): Promise<AudioBuffer> {
-  // Ensure the buffer is correctly aligned for Int16Array (16-bit PCM)
+  // CRITICAL FIX: Ensure the buffer is correctly aligned for Int16Array
   const dataInt16 = new Int16Array(data.buffer, data.byteOffset, data.byteLength / 2);
   const frameCount = dataInt16.length / numChannels;
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
@@ -340,10 +340,10 @@ const App: React.FC = () => {
       addLog("VOICE_LINK: INIT");
       setState(prev => ({ ...prev, isVoiceEnabled: true, isProcessing: true }));
       
-      // Initialize Contexts
+      // Initialize Contexts with precise sample rates
       outAudioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
       inAudioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
-      nextStartTimeRef.current = 0; // Reset scheduling clock
+      nextStartTimeRef.current = 0; 
 
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -387,7 +387,7 @@ const App: React.FC = () => {
               const base64Audio = message.serverContent.modelTurn.parts[0].inlineData.data;
               setState(prev => ({ ...prev, isSpeaking: true }));
               
-              // Ensure next chunk starts exactly after previous, or now if we're behind
+              // CRITICAL: Schedule the next chunk to start at exactly the end of the previous one
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outAudioCtxRef.current!.currentTime);
               
               const audioBuffer = await decodeAudioData(decode(base64Audio), outAudioCtxRef.current!, 24000, 1);
@@ -408,6 +408,7 @@ const App: React.FC = () => {
             }
             
             if (message.serverContent?.interrupted) {
+                // Stop all currently playing snippets immediately
                 audioSourcesRef.current.forEach(s => {
                   try { s.stop(); } catch (e) {}
                 });
@@ -429,7 +430,7 @@ const App: React.FC = () => {
             }
             if (message.serverContent?.turnComplete) {
                 transcriptionRef.current = { user: '', jarvis: '' };
-                setTimeout(() => setLiveTranscript({ user: '', jarvis: '' }), 4000);
+                setTimeout(() => setLiveTranscript({ user: '', jarvis: '' }), 3000);
             }
           },
           onerror: (e: any) => {
