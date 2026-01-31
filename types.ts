@@ -41,6 +41,8 @@ export interface JarvisState {
   isListening: boolean;
   isSpeaking: boolean;
   isVoiceEnabled: boolean;
+  isThinkingMode: boolean; // For complex reasoning
+  isSearchEnabled: boolean; // For web grounding
   currentMode: 'standard' | 'scientific' | 'engineering';
   memory: string[];
 }

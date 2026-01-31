@@ -10,9 +10,23 @@ interface SidebarProps {
   apiLogs?: string[];
   theme: JarvisTheme;
   onThemeChange: (theme: JarvisTheme) => void;
+  isThinkingMode?: boolean;
+  isSearchEnabled?: boolean;
+  onToggleThinking?: () => void;
+  onToggleSearch?: () => void;
 }
 
-const Sidebar: React.FC<SidebarProps> = ({ memory, mode, apiLogs = [], theme, onThemeChange }) => {
+const Sidebar: React.FC<SidebarProps> = ({ 
+  memory, 
+  mode, 
+  apiLogs = [], 
+  theme, 
+  onThemeChange,
+  isThinkingMode,
+  isSearchEnabled,
+  onToggleThinking,
+  onToggleSearch
+}) => {
   const [activeTab, setActiveTab] = useState<'monitor' | 'neural' | 'archive'>('monitor');
   const themeColors = THEMES[theme];
 
@@ -60,6 +74,29 @@ const Sidebar: React.FC<SidebarProps> = ({ memory, mode, apiLogs = [], theme, on
                 ))}
               </div>
             </section>
+            
+            <section className="space-y-3">
+              <h3 className="text-[10px] font-bold mono mb-4 opacity-40 uppercase tracking-widest">Advanced_Directives</h3>
+              <button 
+                onClick={onToggleThinking}
+                className={`w-full flex justify-between items-center p-3 rounded-xl border transition-all ${isThinkingMode ? 'bg-violet-500/10 border-violet-500/50' : 'border-white/5'}`}
+              >
+                <span className={`mono text-[10px] ${isThinkingMode ? 'text-violet-400' : 'opacity-40'}`}>Phi_Reasoning</span>
+                <div className={`w-8 h-4 rounded-full p-1 transition-all ${isThinkingMode ? 'bg-violet-500' : 'bg-white/10'}`}>
+                  <div className={`w-2 h-2 rounded-full bg-white transition-all ${isThinkingMode ? 'translate-x-4' : 'translate-x-0'}`} />
+                </div>
+              </button>
+              <button 
+                onClick={onToggleSearch}
+                className={`w-full flex justify-between items-center p-3 rounded-xl border transition-all ${isSearchEnabled ? 'bg-cyan-500/10 border-cyan-500/50' : 'border-white/5'}`}
+              >
+                <span className={`mono text-[10px] ${isSearchEnabled ? 'text-cyan-400' : 'opacity-40'}`}>Web_Grounding</span>
+                <div className={`w-8 h-4 rounded-full p-1 transition-all ${isSearchEnabled ? 'bg-cyan-500' : 'bg-white/10'}`}>
+                  <div className={`w-2 h-2 rounded-full bg-white transition-all ${isSearchEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                </div>
+              </button>
+            </section>
+
             <SystemDashboard mode={mode} theme={theme} />
           </div>
         )}
@@ -69,22 +106,28 @@ const Sidebar: React.FC<SidebarProps> = ({ memory, mode, apiLogs = [], theme, on
              <div className="p-4 rounded-xl border border-white/10 bg-black/20 space-y-4">
                 <div className="flex justify-between items-center text-[10px]">
                   <span className="opacity-40">API_VERSION</span>
-                  <span className="text-cyan-400">1.0.4-BETA</span>
+                  <span className="text-cyan-400">1.0.5-BETA</span>
                 </div>
                 <div className="flex justify-between items-center text-[10px]">
                   <span className="opacity-40">NEURAL_TEMP</span>
-                  <span className="text-cyan-400">0.72</span>
+                  <span className="text-cyan-400">{isThinkingMode ? '0.95' : '0.72'}</span>
+                </div>
+                <div className="flex justify-between items-center text-[10px]">
+                  <span className="opacity-40">REASONING_BUDGET</span>
+                  <span className={isThinkingMode ? 'text-violet-400' : 'text-slate-600'}>{isThinkingMode ? '32,768' : 'DISABLED'}</span>
                 </div>
                 <div className="h-[1px] bg-white/5" />
                 <div className="space-y-2">
                    <p className="text-[9px] opacity-40 uppercase">Throttling</p>
                    <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
-                      <div className="h-full bg-cyan-500 w-[65%]" />
+                      <div className={`h-full transition-all duration-1000 ${isThinkingMode ? 'bg-violet-500 w-[92%]' : 'bg-cyan-500 w-[65%]'}`} />
                    </div>
                 </div>
              </div>
              <div className="text-[10px] mono text-slate-500 leading-relaxed italic">
-                "Your Stark-1 API is optimized for high-energy physics and material science calculations. Direct terminal access enabled."
+                {isThinkingMode 
+                  ? '"Reasoning protocols initialized. Allocating maximum synaptic budget for first-principles derivation."'
+                  : '"Standard uplink stable. Grounding toolsets are at the ready, Sir."'}
              </div>
           </div>
         )}
@@ -102,13 +145,15 @@ const Sidebar: React.FC<SidebarProps> = ({ memory, mode, apiLogs = [], theme, on
       </div>
 
       <div className="mt-auto pt-6 border-t border-white/5">
-         <div className="flex items-center gap-3 p-3 bg-cyan-500/5 rounded-xl border border-cyan-500/10">
-            <div className="w-8 h-8 rounded bg-cyan-400/10 flex items-center justify-center">
-               <svg className="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
+         <div className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${isThinkingMode ? 'bg-violet-500/5 border-violet-500/10' : 'bg-cyan-500/5 border-cyan-500/10'}`}>
+            <div className={`w-8 h-8 rounded flex items-center justify-center transition-all ${isThinkingMode ? 'bg-violet-400/10' : 'bg-cyan-400/10'}`}>
+               <svg className={`w-4 h-4 transition-all ${isThinkingMode ? 'text-violet-400' : 'text-cyan-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" /></svg>
             </div>
             <div className="flex flex-col">
                <span className="text-[8px] mono opacity-40 uppercase">System_Mode</span>
-               <span className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest">{mode}</span>
+               <span className={`text-[10px] font-bold uppercase tracking-widest transition-all ${isThinkingMode ? 'text-violet-400' : 'text-cyan-400'}`}>
+                 {isThinkingMode ? 'Deep_Reasoning' : isSearchEnabled ? 'Grounding_Uplink' : mode}
+               </span>
             </div>
          </div>
       </div>

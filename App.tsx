@@ -68,6 +68,8 @@ const App: React.FC = () => {
   const [lastPayload, setLastPayload] = useState<any>(null);
   const [liveTranscript, setLiveTranscript] = useState({ user: '', jarvis: '' });
   const [streamingText, setStreamingText] = useState<string>('');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   const [state, setState] = useState<JarvisState & { 
     apiLogs: string[], 
@@ -81,6 +83,8 @@ const App: React.FC = () => {
     isListening: false,
     isSpeaking: false,
     isVoiceEnabled: false,
+    isThinkingMode: false,
+    isSearchEnabled: false,
     currentMode: 'scientific',
     memory: ["Neural link calibrated.", "Stark Gateway Online."],
     apiLogs: ["CORE_READY", "API_V1_INIT"],
@@ -98,7 +102,6 @@ const App: React.FC = () => {
   const nextStartTimeRef = useRef<number>(0);
   const audioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const transcriptionRef = useRef({ user: '', jarvis: '' });
-  const heartbeatRef = useRef<number | null>(null);
 
   const addLog = useCallback((log: string) => {
     setState(prev => ({ ...prev, apiLogs: [log, ...prev.apiLogs].slice(0, 20) }));
@@ -114,22 +117,46 @@ const App: React.FC = () => {
 
   useEffect(() => {
     validateApiKey();
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, [validateApiKey]);
 
   // Initialize Chat Session
   const initChatSession = useCallback(() => {
     if (!validateApiKey()) return;
     const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+    
+    // Choose model based on mode
+    // Thinking Mode: gemini-3-pro-preview
+    // Search/Standard: gemini-3-flash-preview
+    const modelName = state.isThinkingMode ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
+    
+    const config: any = {
+      systemInstruction: JARVIS_SYSTEM_INSTRUCTION + (isMobile ? "\n\nCRITICAL: User is on mobile. Be extremely concise." : ""),
+      tools: [{ functionDeclarations: [HOLOGRAM_TOOL] }],
+      temperature: state.temperature
+    };
+
+    if (state.isThinkingMode) {
+      config.thinkingConfig = { thinkingBudget: 32768 };
+    }
+
+    if (state.isSearchEnabled && !state.isThinkingMode) {
+      config.tools.push({ googleSearch: {} });
+    }
+
     chatSessionRef.current = ai.chats.create({
-      model: 'gemini-3-flash-preview',
-      config: {
-        systemInstruction: JARVIS_SYSTEM_INSTRUCTION,
-        tools: [{ functionDeclarations: [HOLOGRAM_TOOL] }],
-        temperature: state.temperature
-      }
+      model: modelName,
+      config: config
     });
-    addLog("NEURAL_SESSION: CREATED");
-  }, [validateApiKey, state.temperature, addLog]);
+    addLog(`NEURAL_SESSION: CREATED [MODEL: ${modelName.toUpperCase()}]`);
+  }, [validateApiKey, state.temperature, state.isThinkingMode, state.isSearchEnabled, addLog, isMobile]);
+
+  // Re-init session if modes change
+  useEffect(() => {
+    if (currentUser) initChatSession();
+  }, [state.isThinkingMode, state.isSearchEnabled]);
 
   const handleLogin = useCallback((user: User) => {
     setCurrentUser(user);
@@ -153,7 +180,6 @@ const App: React.FC = () => {
 
   const handleLogout = useCallback(() => {
     if (sessionRef.current) sessionRef.current.close();
-    if (heartbeatRef.current) window.clearInterval(heartbeatRef.current);
     chatSessionRef.current = null;
     setCurrentUser(null);
     setMessages([]);
@@ -284,11 +310,15 @@ const App: React.FC = () => {
 
     const userMsg: Message = { id: `u-${Date.now()}`, role: MessageRole.USER, text, timestamp: Date.now(), image: imageData };
     setMessages(prev => [...prev, userMsg]);
-    setState(prev => ({ ...prev, isProcessing: true, streamStatus: 'OPTIMIZING_COGNITION' }));
+    setState(prev => ({ 
+      ...prev, 
+      isProcessing: true, 
+      streamStatus: state.isThinkingMode ? 'NEURAL_SYNAPSE_FIRING' : 'OPTIMIZING_COGNITION' 
+    }));
     setStreamingText('');
     
     const startTime = Date.now();
-    addLog(`UPLINK_SENT: ${text.substring(0, 15)}...`);
+    addLog(`UPLINK_SENT [${state.isThinkingMode ? 'THINK' : 'STD'}]: ${text.substring(0, 15)}...`);
 
     try {
       const messageInput = imageData ? {
@@ -301,16 +331,36 @@ const App: React.FC = () => {
       const stream = await chatSessionRef.current.sendMessageStream({ message: messageInput });
 
       let fullText = '';
+      let fullThinking = '';
+      let groundingLinks: GroundingLink[] = [];
+
       setState(prev => ({ ...prev, streamStatus: 'RECONSTRUCTING_DATA' }));
 
       for await (const chunk of stream) {
+        // Handle thinking part
+        const thinkingPart = chunk.candidates?.[0]?.content?.parts?.find(p => p.thought);
+        if (thinkingPart) {
+          fullThinking += thinkingPart.thought;
+        }
+
         const chunkText = chunk.text;
         if (chunkText) {
           fullText += chunkText;
           setStreamingText(fullText);
         }
 
-        // Handle function calls during stream
+        // Extract grounding chunks if available
+        const chunks = chunk.candidates?.[0]?.groundingMetadata?.groundingChunks;
+        if (chunks) {
+          chunks.forEach((c: any) => {
+            if (c.web?.uri && c.web?.title) {
+              if (!groundingLinks.find(l => l.uri === c.web.uri)) {
+                groundingLinks.push({ title: c.web.title, uri: c.web.uri });
+              }
+            }
+          });
+        }
+
         if (chunk.candidates?.[0]?.content?.parts) {
           for (const part of chunk.candidates[0].content.parts) {
             if (part.functionCall && part.functionCall.name === 'generate_hologram') {
@@ -321,24 +371,20 @@ const App: React.FC = () => {
         }
       }
 
-      const latency = Date.now() - startTime;
-      addLog(`RESPONSE_RECEIVED: ${latency}ms`);
-
-      setMessages(prev => [...prev, {
-        id: `j-${Date.now()}`,
-        role: MessageRole.JARVIS,
-        text: fullText || "Neural processing complete, Sir.",
-        timestamp: Date.now()
+      addLog(`RESPONSE_RECEIVED: ${Date.now() - startTime}ms`);
+      setMessages(prev => [...prev, { 
+        id: `j-${Date.now()}`, 
+        role: MessageRole.JARVIS, 
+        text: fullText || "Neural processing complete.", 
+        timestamp: Date.now(),
+        thinking: fullThinking || undefined,
+        groundingLinks: groundingLinks.length > 0 ? groundingLinks : undefined
       }]);
       setStreamingText('');
       setState(prev => ({ ...prev, streamStatus: 'SYNC_COMPLETE' }));
-
     } catch (e: any) {
       addLog(`CORE_FAULT: ${e.message}`);
-      const errorMsg = e.message?.includes('quota') ? ERROR_MESSAGES.QUOTA : `Uplink Severed: ${e.message}`;
-      setMessages(prev => [...prev, { id: `err-${Date.now()}`, role: MessageRole.JARVIS, text: errorMsg, timestamp: Date.now(), isError: true }]);
-      // If critical fault, re-init session
-      if (e.message?.includes('invalid') || e.message?.includes('expired')) initChatSession();
+      setMessages(prev => [...prev, { id: `err-${Date.now()}`, role: MessageRole.JARVIS, text: ERROR_MESSAGES.GENERIC, timestamp: Date.now(), isError: true }]);
     } finally {
       setState(prev => ({ ...prev, isProcessing: false, streamStatus: null }));
     }
@@ -347,40 +393,73 @@ const App: React.FC = () => {
   if (!currentUser) return <AuthPage onLogin={handleLogin} />;
 
   return (
-    <div className="h-screen w-screen bg-[#010409] text-slate-100 flex overflow-hidden font-mono text-xs selection:bg-cyan-500/30">
-      <Sidebar memory={state.memory} mode={state.currentMode} apiLogs={state.apiLogs} theme={activeTheme} onThemeChange={(t) => setActiveTheme(t)} />
+    <div className="h-full w-full bg-[#010409] text-slate-100 flex overflow-hidden font-mono text-xs selection:bg-cyan-500/30 relative">
+      {/* Sidebar - Conditional Drawer for Mobile */}
+      <div className={`fixed inset-y-0 left-0 z-50 transform transition-transform duration-300 lg:relative lg:translate-x-0 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <Sidebar 
+          memory={state.memory} 
+          mode={state.currentMode} 
+          apiLogs={state.apiLogs} 
+          theme={activeTheme} 
+          onThemeChange={(t) => setActiveTheme(t)} 
+          isThinkingMode={state.isThinkingMode}
+          isSearchEnabled={state.isSearchEnabled}
+          onToggleThinking={() => setState(s => ({...s, isThinkingMode: !s.isThinkingMode, isSearchEnabled: s.isThinkingMode ? s.isSearchEnabled : false }))}
+          onToggleSearch={() => setState(s => ({...s, isSearchEnabled: !s.isSearchEnabled, isThinkingMode: s.isSearchEnabled ? s.isThinkingMode : false }))}
+        />
+        {isMobile && isSidebarOpen && <button onClick={() => setIsSidebarOpen(false)} className="fixed top-4 right-[-40px] w-8 h-8 glass flex items-center justify-center rounded-r-lg text-cyan-400">×</button>}
+      </div>
+
+      {isMobile && isSidebarOpen && <div className="fixed inset-0 bg-black/60 z-40" onClick={() => setIsSidebarOpen(false)} />}
       
-      <main className="flex-1 flex flex-col relative">
-        <Header user={currentUser} theme={activeTheme} speaking={state.isSpeaking} listening={state.isListening} onLogout={handleLogout} apiOk={state.isApiValid} />
+      <main className="flex-1 flex flex-col relative overflow-hidden">
+        <Header user={currentUser} theme={activeTheme} speaking={state.isSpeaking} listening={state.isListening} onLogout={handleLogout} apiOk={state.isApiValid} onToggleMenu={() => setIsSidebarOpen(!isSidebarOpen)} isMobile={isMobile} />
         
         <div className="flex-1 relative flex flex-col overflow-hidden">
-          <div className="absolute top-4 right-4 z-50 flex gap-2">
-             <button onClick={() => setShowApiConsole(!showApiConsole)} className={`px-3 py-1 border rounded transition-all ${showApiConsole ? 'bg-cyan-500/20 border-cyan-400 text-cyan-400' : 'border-white/10 text-slate-500 hover:border-white/30'}`}>API_CONSOLE</button>
-          </div>
+          {!isMobile && (
+            <div className="absolute top-4 right-4 z-50 flex gap-2">
+               <button onClick={() => setShowApiConsole(!showApiConsole)} className={`px-3 py-1 border rounded transition-all ${showApiConsole ? 'bg-cyan-500/20 border-cyan-400 text-cyan-400' : 'border-white/10 text-slate-500 hover:border-white/30'}`}>API_CONSOLE</button>
+            </div>
+          )}
 
           <div className="absolute inset-0 z-0 opacity-20 pointer-events-none">
             <JarvisCore active={state.isProcessing} theme={activeTheme} speaking={state.isSpeaking} />
           </div>
 
-          <div className="flex-1 z-10 p-6 flex gap-6 overflow-hidden">
-            <div className={`flex-1 flex flex-col transition-all duration-500 ${showApiConsole ? 'w-1/2' : 'w-full'}`}>
+          <div className="flex-1 z-10 p-4 lg:p-6 flex flex-col lg:flex-row gap-4 lg:gap-6 overflow-hidden">
+            <div className={`flex-1 flex flex-col transition-all duration-500 ${showApiConsole ? 'lg:w-1/2' : 'w-full'}`}>
               <ChatWindow messages={messages} isProcessing={state.isProcessing} theme={activeTheme} liveTranscript={liveTranscript} streamingText={streamingText} streamStatus={state.streamStatus} />
             </div>
 
-            {showApiConsole && (
-              <div className="w-1/2 flex flex-col animate-in slide-in-from-right-10"><ApiConsole payload={lastPayload} logs={state.apiLogs} theme={activeTheme} /></div>
+            {showApiConsole && !isMobile && (
+              <div className="lg:w-1/2 flex flex-col animate-in slide-in-from-right-10"><ApiConsole payload={lastPayload} logs={state.apiLogs} theme={activeTheme} /></div>
             )}
             
-            {state.hologram && !showApiConsole && (
-              <div className="w-[400px] h-full glass border border-white/10 rounded-2xl overflow-hidden relative animate-in zoom-in-95 duration-500">
+            {state.hologram && (
+              <div className={`${isMobile ? 'h-64' : 'w-[400px] h-full'} glass border border-white/10 rounded-2xl overflow-hidden relative animate-in zoom-in-95 duration-500 shrink-0`}>
                 <HologramStage imageUrl={state.hologram.imageUrl!} subject={state.hologram.subject} color={THEMES[activeTheme].primary} />
-                <button onClick={() => setState(s => ({...s, hologram: null}))} className="absolute bottom-4 right-4 px-3 py-1 bg-red-500/20 border border-red-500/50 rounded text-[9px] text-red-500 hover:bg-red-500/30 transition-all">TERMINATE_PROJECTION</button>
+                <button onClick={() => setState(s => ({...s, hologram: null}))} className="absolute bottom-4 right-4 px-3 py-1 bg-red-500/20 border border-red-500/50 rounded text-[9px] text-red-500 hover:bg-red-500/30 transition-all">TERMINATE</button>
               </div>
             )}
           </div>
         </div>
 
-        <ControlPanel theme={activeTheme} isProcessing={state.isProcessing} isVoiceEnabled={state.isVoiceEnabled} isListening={state.isListening} isSpeaking={state.isSpeaking} onSend={handleSendMessage} onVoiceToggle={toggleVoice} onModeChange={(m) => setState(prev => ({ ...prev, currentMode: m }))} onManualHologram={generateHologram} />
+        <ControlPanel 
+          theme={activeTheme} 
+          isProcessing={state.isProcessing} 
+          isVoiceEnabled={state.isVoiceEnabled} 
+          isListening={state.isListening} 
+          isSpeaking={state.isSpeaking} 
+          onSend={handleSendMessage} 
+          onVoiceToggle={toggleVoice} 
+          onModeChange={(m) => setState(prev => ({ ...prev, currentMode: m }))} 
+          onManualHologram={generateHologram} 
+          isMobile={isMobile}
+          isThinkingMode={state.isThinkingMode}
+          isSearchEnabled={state.isSearchEnabled}
+          onToggleThinking={() => setState(s => ({...s, isThinkingMode: !s.isThinkingMode}))}
+          onToggleSearch={() => setState(s => ({...s, isSearchEnabled: !s.isSearchEnabled}))}
+        />
       </main>
       <div className="crt-overlay" />
     </div>

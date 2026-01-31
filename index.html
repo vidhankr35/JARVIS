@@ -3,11 +3,14 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>J.A.R.V.I.S.</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Space+Mono&display=swap" rel="stylesheet">
     <style>
+        :root {
+          --app-height: 100%;
+        }
         body {
             margin: 0;
             padding: 0;
@@ -15,6 +18,12 @@
             color: #e2e8f0;
             font-family: 'Inter', sans-serif;
             overflow: hidden;
+            height: 100dvh; /* Use dynamic viewport height */
+        }
+        #root {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
         }
         .mono { font-family: 'Space Mono', monospace; }
         .glass {
@@ -26,34 +35,9 @@
             box-shadow: 0 0 30px rgba(34, 211, 238, 0.15);
         }
         
-        /* Holographic Glitch & Flicker */
-        @keyframes glitch {
-          0% { transform: translate(0); }
-          20% { transform: translate(-2px, 2px); }
-          40% { transform: translate(-2px, -2px); }
-          60% { transform: translate(2px, 2px); }
-          80% { transform: translate(2px, -2px); }
-          100% { transform: translate(0); }
-        }
-        
-        @keyframes flicker {
-          0% { opacity: 0.97; }
-          5% { opacity: 0.92; }
-          10% { opacity: 0.98; }
-          15% { opacity: 0.93; }
-          20% { opacity: 0.99; }
-          100% { opacity: 1; }
-        }
-
         @keyframes scanline {
           0% { bottom: 100%; }
           100% { bottom: 0%; }
-        }
-
-        .hologram-effect {
-          position: relative;
-          overflow: hidden;
-          animation: flicker 0.2s infinite;
         }
 
         .typing-cursor::after {
