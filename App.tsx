@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration, GenerateContentResponse } from '@google/genai';
 import { Message, MessageRole, JarvisState, User, JarvisTheme, GroundingLink } from './types';
@@ -107,7 +106,8 @@ const App: React.FC = () => {
     isThinkingMode: false,
     isSearchEnabled: false,
     isSimulationActive: false,
-    currentMode: 'scientific',
+    // Fix: line 109 - Use a valid string literal for currentMode initialization instead of a type union.
+    currentMode: 'standard',
     memory: ["Neural link calibrated.", "Stark Gateway Online."],
     apiLogs: ["CORE_READY", "API_V1_INIT"],
     hologram: null,
@@ -139,6 +139,7 @@ const App: React.FC = () => {
     validateApiKey();
     const handleResize = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener('resize', handleResize);
+    // Fix: line 141 - Use standard removeEventListener for cleanup.
     return () => window.removeEventListener('resize', handleResize);
   }, [validateApiKey]);
 
@@ -195,12 +196,15 @@ const App: React.FC = () => {
         config: { imageConfig: { aspectRatio: "1:1" } }
       });
 
-      for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) {
-          const imageUrl = `data:image/png;base64,${part.inlineData.data}`;
-          setState(prev => ({ ...prev, hologram: { subject, imageUrl } }));
-          addLog(`VISUAL_RENDERED: ${subject.toUpperCase()}`);
-          break;
+      const parts = response.candidates?.[0]?.content?.parts;
+      if (parts) {
+        for (const part of parts) {
+          if (part.inlineData) {
+            const imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+            setState(prev => ({ ...prev, hologram: { subject, imageUrl } }));
+            addLog(`VISUAL_RENDERED: ${subject.toUpperCase()}`);
+            break;
+          }
         }
       }
     } catch (e: any) { addLog(`OPTIC_ERR: ${e.message}`); }
@@ -295,7 +299,8 @@ const App: React.FC = () => {
             addLog("VOICE_UPLINK: ONLINE");
           },
           onmessage: async (msg: LiveServerMessage) => {
-            if (msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data) {
+            const audioData = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+            if (audioData) {
               if (outAudioCtxRef.current?.state === 'suspended') await outAudioCtxRef.current.resume();
               setState(prev => ({ ...prev, isSpeaking: true }));
               
@@ -303,7 +308,7 @@ const App: React.FC = () => {
               nextStartTimeRef.current = Math.max(nextStartTimeRef.current, outAudioCtxRef.current.currentTime);
               
               try {
-                const buffer = await decodeAudioData(decode(msg.serverContent.modelTurn.parts[0].inlineData.data), outAudioCtxRef.current, 24000, 1);
+                const buffer = await decodeAudioData(decode(audioData), outAudioCtxRef.current, 24000, 1);
                 const source = outAudioCtxRef.current.createBufferSource();
                 source.buffer = buffer;
                 source.connect(outAudioCtxRef.current.destination);
