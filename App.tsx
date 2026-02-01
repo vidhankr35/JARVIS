@@ -11,7 +11,7 @@ import HologramStage from './components/HologramStage';
 import AuthPage from './components/AuthPage';
 import ApiConsole from './components/ApiConsole';
 
-// Precise build-time environment declarations
+// Build-time environment declarations
 declare global {
   namespace NodeJS {
     interface ProcessEnv {
@@ -39,22 +39,16 @@ function decode(base64: string): Uint8Array {
   return bytes;
 }
 
-/**
- * FIXED: decodeAudioData now handles alignment issues that cause "failure in code" (RangeError).
- * It ensures the input buffer is properly aligned for Int16Array construction.
- */
 async function decodeAudioData(
   data: Uint8Array,
   ctx: AudioContext,
   sampleRate: number,
   numChannels: number,
 ): Promise<AudioBuffer> {
-  // Ensure the buffer is aligned to 2 bytes for Int16Array
   let dataInt16: Int16Array;
   if (data.byteOffset % 2 === 0) {
     dataInt16 = new Int16Array(data.buffer, data.byteOffset, data.byteLength / 2);
   } else {
-    // If not aligned, create a copy which will be correctly aligned
     const alignedCopy = new Uint8Array(data.length);
     alignedCopy.set(data);
     dataInt16 = new Int16Array(alignedCopy.buffer, 0, alignedCopy.length / 2);
@@ -152,7 +146,7 @@ const App: React.FC = () => {
         systemInstruction: JARVIS_SYSTEM_INSTRUCTION,
         tools: state.isSearchEnabled ? [{ googleSearch: {} }] : [{ functionDeclarations: [HOLOGRAM_TOOL] }],
         temperature: state.temperature,
-        thinkingConfig: state.isThinkingMode ? { thinkingBudget: 24576 } : undefined
+        thinkingConfig: state.isThinkingMode ? { thinkingBudget: state.isThinkingMode ? 32768 : 0 } : undefined
       };
 
       chatSessionRef.current = ai.chats.create({ model: modelName, config });
@@ -194,15 +188,16 @@ const App: React.FC = () => {
         config: { imageConfig: { aspectRatio: "1:1" } }
       });
 
-      const candidates = response.candidates;
-      if (candidates && candidates.length > 0 && candidates[0].content && candidates[0].content.parts) {
-        const parts = candidates[0].content.parts;
-        for (const part of parts) {
-          if (part.inlineData) {
-            const imageUrl = `data:image/png;base64,${part.inlineData.data}`;
-            setState(prev => ({ ...prev, hologram: { subject, imageUrl } }));
-            addLog(`VISUAL_RENDERED: ${subject.toUpperCase()}`);
-            break;
+      if (response && response.candidates && response.candidates.length > 0) {
+        const parts = response.candidates[0].content?.parts;
+        if (parts) {
+          for (const part of parts) {
+            if (part.inlineData) {
+              const imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+              setState(prev => ({ ...prev, hologram: { subject, imageUrl } }));
+              addLog(`VISUAL_RENDERED: ${subject.toUpperCase()}`);
+              break;
+            }
           }
         }
       }
@@ -229,12 +224,13 @@ const App: React.FC = () => {
         fullText += textChunk;
         setStreamingText(fullText);
 
-        const candidates = chunk.candidates;
-        if (candidates && candidates.length > 0 && candidates[0].groundingMetadata?.groundingChunks) {
-          const ground = candidates[0].groundingMetadata.groundingChunks;
-          ground.forEach((c: any) => {
-            if (c.web) links.push({ title: c.web.title || 'Source', uri: c.web.uri });
-          });
+        if (chunk.candidates && chunk.candidates.length > 0) {
+          const grounding = chunk.candidates[0].groundingMetadata?.groundingChunks;
+          if (grounding) {
+            grounding.forEach((c: any) => {
+              if (c.web) links.push({ title: c.web.title || 'Source', uri: c.web.uri });
+            });
+          }
         }
 
         if (chunk.functionCalls) {
@@ -299,10 +295,10 @@ const App: React.FC = () => {
             addLog("VOICE_UPLINK: ONLINE");
           },
           onmessage: async (msg: LiveServerMessage) => {
-            const content = msg.serverContent;
-            if (!content) return;
+            const serverContent = msg.serverContent;
+            if (!serverContent) return;
 
-            const audioData = content.modelTurn?.parts?.[0]?.inlineData?.data;
+            const audioData = serverContent.modelTurn?.parts?.[0]?.inlineData?.data;
             if (audioData) {
               if (outAudioCtxRef.current?.state === 'suspended') await outAudioCtxRef.current.resume();
               setState(prev => ({ ...prev, isSpeaking: true }));
@@ -326,21 +322,21 @@ const App: React.FC = () => {
                 console.error("Audio Decode/Play Fail:", err);
               }
             }
-            if (content.interrupted) {
+            if (serverContent.interrupted) {
               audioSourcesRef.current.forEach(s => { try { s.stop(); } catch {} });
               audioSourcesRef.current.clear();
               nextStartTimeRef.current = outAudioCtxRef.current?.currentTime || 0;
               setState(prev => ({ ...prev, isSpeaking: false }));
             }
-            if (content.inputTranscription) {
-              transcriptionRef.current.user += content.inputTranscription.text;
+            if (serverContent.inputTranscription) {
+              transcriptionRef.current.user += serverContent.inputTranscription.text;
               setLiveTranscript(prev => ({ ...prev, user: transcriptionRef.current.user }));
             }
-            if (content.outputTranscription) {
-              transcriptionRef.current.jarvis += content.outputTranscription.text;
+            if (serverContent.outputTranscription) {
+              transcriptionRef.current.jarvis += serverContent.outputTranscription.text;
               setLiveTranscript(prev => ({ ...prev, jarvis: transcriptionRef.current.jarvis }));
             }
-            if (content.turnComplete) {
+            if (serverContent.turnComplete) {
               transcriptionRef.current = { user: '', jarvis: '' };
               setTimeout(() => setLiveTranscript({ user: '', jarvis: '' }), 4000);
             }
