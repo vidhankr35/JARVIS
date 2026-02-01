@@ -106,7 +106,6 @@ const App: React.FC = () => {
     isThinkingMode: false,
     isSearchEnabled: false,
     isSimulationActive: false,
-    // Fix: line 109 - Use a valid string literal for currentMode initialization instead of a type union.
     currentMode: 'standard',
     memory: ["Neural link calibrated.", "Stark Gateway Online."],
     apiLogs: ["CORE_READY", "API_V1_INIT"],
@@ -139,7 +138,6 @@ const App: React.FC = () => {
     validateApiKey();
     const handleResize = () => setIsMobile(window.innerWidth < 768);
     window.addEventListener('resize', handleResize);
-    // Fix: line 141 - Use standard removeEventListener for cleanup.
     return () => window.removeEventListener('resize', handleResize);
   }, [validateApiKey]);
 
@@ -154,7 +152,7 @@ const App: React.FC = () => {
         systemInstruction: JARVIS_SYSTEM_INSTRUCTION,
         tools: state.isSearchEnabled ? [{ googleSearch: {} }] : [{ functionDeclarations: [HOLOGRAM_TOOL] }],
         temperature: state.temperature,
-        thinkingConfig: state.isThinkingMode ? { thinkingBudget: 32768 } : undefined
+        thinkingConfig: state.isThinkingMode ? { thinkingBudget: 24576 } : undefined
       };
 
       chatSessionRef.current = ai.chats.create({ model: modelName, config });
@@ -196,8 +194,9 @@ const App: React.FC = () => {
         config: { imageConfig: { aspectRatio: "1:1" } }
       });
 
-      const parts = response.candidates?.[0]?.content?.parts;
-      if (parts) {
+      const candidates = response.candidates;
+      if (candidates && candidates.length > 0 && candidates[0].content && candidates[0].content.parts) {
+        const parts = candidates[0].content.parts;
         for (const part of parts) {
           if (part.inlineData) {
             const imageUrl = `data:image/png;base64,${part.inlineData.data}`;
@@ -230,8 +229,9 @@ const App: React.FC = () => {
         fullText += textChunk;
         setStreamingText(fullText);
 
-        const ground = chunk.candidates?.[0]?.groundingMetadata?.groundingChunks;
-        if (ground) {
+        const candidates = chunk.candidates;
+        if (candidates && candidates.length > 0 && candidates[0].groundingMetadata?.groundingChunks) {
+          const ground = candidates[0].groundingMetadata.groundingChunks;
           ground.forEach((c: any) => {
             if (c.web) links.push({ title: c.web.title || 'Source', uri: c.web.uri });
           });
@@ -299,7 +299,10 @@ const App: React.FC = () => {
             addLog("VOICE_UPLINK: ONLINE");
           },
           onmessage: async (msg: LiveServerMessage) => {
-            const audioData = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+            const content = msg.serverContent;
+            if (!content) return;
+
+            const audioData = content.modelTurn?.parts?.[0]?.inlineData?.data;
             if (audioData) {
               if (outAudioCtxRef.current?.state === 'suspended') await outAudioCtxRef.current.resume();
               setState(prev => ({ ...prev, isSpeaking: true }));
@@ -323,21 +326,21 @@ const App: React.FC = () => {
                 console.error("Audio Decode/Play Fail:", err);
               }
             }
-            if (msg.serverContent?.interrupted) {
+            if (content.interrupted) {
               audioSourcesRef.current.forEach(s => { try { s.stop(); } catch {} });
               audioSourcesRef.current.clear();
               nextStartTimeRef.current = outAudioCtxRef.current?.currentTime || 0;
               setState(prev => ({ ...prev, isSpeaking: false }));
             }
-            if (msg.serverContent?.inputTranscription) {
-              transcriptionRef.current.user += msg.serverContent.inputTranscription.text;
+            if (content.inputTranscription) {
+              transcriptionRef.current.user += content.inputTranscription.text;
               setLiveTranscript(prev => ({ ...prev, user: transcriptionRef.current.user }));
             }
-            if (msg.serverContent?.outputTranscription) {
-              transcriptionRef.current.jarvis += msg.serverContent.outputTranscription.text;
+            if (content.outputTranscription) {
+              transcriptionRef.current.jarvis += content.outputTranscription.text;
               setLiveTranscript(prev => ({ ...prev, jarvis: transcriptionRef.current.jarvis }));
             }
-            if (msg.serverContent?.turnComplete) {
+            if (content.turnComplete) {
               transcriptionRef.current = { user: '', jarvis: '' };
               setTimeout(() => setLiveTranscript({ user: '', jarvis: '' }), 4000);
             }
